@@ -2,6 +2,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use std::net::{TcpListener, TcpStream};
+use std::io::Read;
 
 use rand::Rng;
 use rand::seq::SliceRandom;
@@ -109,13 +111,13 @@ impl Peer {
     pub fn new(address: String) -> Peer {
         Peer {address, age: 0}
     }
-    // TODO
     pub fn increment_age(&mut self) {
         self.age += 1;
     }
-    pub fn get_age(&self) -> u64 {
+    pub fn age(&self) -> u64 {
         self.age
     }
+    pub fn address(&self) -> &str { &self.address }
 }
 impl PartialEq for Peer {
     fn eq(&self, other: &Self) -> bool {
@@ -138,11 +140,21 @@ impl PeerSamplingService {
         }
     }
 
-    pub fn init(&mut self, init: Box<dyn FnOnce() -> Peer>) {
-        let first_peer = init();
-        self.view.lock().unwrap().peers.push(first_peer);
+    pub fn init(&mut self, init: Box<dyn FnOnce() -> Option<Peer>>) -> JoinHandle<()> {
+        // get address of initial peer(s)
+        if let Some(initial_peer) = init() {
+            self.view.lock().unwrap().peers.push(initial_peer);
+        }
+
+        // listen to incoming message
+        let listener_handler = self.start_listener(&self.config.bind_address);
+
+        // start peer sampling
         let sampling_handler = self.start_sampling_activity();
-        sampling_handler.join().unwrap();
+
+        // join threads
+        listener_handler
+        //sampling_handler.join().unwrap();
     }
 
     pub fn get_peer(&mut self) -> Option<&Peer> {
@@ -152,20 +164,49 @@ impl PeerSamplingService {
     fn start_sampling_activity(&self) -> JoinHandle<()> {
         let config = self.config.clone();
         let arc = self.view.clone();
-        std::thread::Builder::new().name("peer sampling".to_string()).spawn(move || {
+        std::thread::Builder::new().name(config.bind_address.clone()).spawn(move || {
             loop {
                 std::thread::sleep(Duration::from_secs(config.sampling_period));
                 log::debug!("Starting sampling protocol");
                 let mut view = arc.lock().unwrap();
                 if let Some(peer) = view.select_peer() {
-                    let mut buffer = vec![ Peer::new(config.bind_address.clone()) ];
-                    view.permute();
-                    view.move_oldest_to_end(config.healing_factor);
-                    buffer.append(&mut view.head(config.view_size));
-                    crate::network::send(peer, buffer);
+                    if config.push {
+                        let mut buffer = vec![ Peer::new(config.bind_address.clone()) ];
+                        view.permute();
+                        view.move_oldest_to_end(config.healing_factor);
+                        buffer.append(&mut view.head(config.view_size));
+                        if let Ok(_) = crate::network::send(peer, buffer) {
+                            log::debug!("Message sent");
+                        }
+                        else {
+                            log::error!("Message not sent");
+                        }
+                    }
+                    else {
+                        // TODO: send null to p
+                    }
                 }
                 else {
                     log::warn!("No peer found for sampling")
+                }
+            }
+        }).unwrap()
+    }
+
+    fn start_listener(&self, bind_address: &str) -> JoinHandle<()>{
+        let listener = TcpListener::bind(bind_address).expect("error whith bind address");
+        log::info!("Started listener on {}", bind_address);
+        std::thread::Builder::new().name(bind_address.to_string()).spawn(move ||{
+            for incoming_stream in listener.incoming() {
+                if let Ok(mut stream) = incoming_stream {
+                    let mut buf = Vec::new();
+                    if let Ok(count) = stream.read_to_end(&mut buf) {
+                        let msg = String::from_utf8(buf.clone()).unwrap();
+                        log::debug!("Received: {}", msg);
+                    }
+                }
+                else {
+                    log::error!("Error with incoming connection");
                 }
             }
         }).unwrap()
