@@ -7,6 +7,9 @@ use std::io::Read;
 
 use rand::Rng;
 use rand::seq::SliceRandom;
+use crate::message::Message;
+use std::error::Error;
+use std::ops::Index;
 
 #[derive(Clone)]
 pub struct Config {
@@ -101,10 +104,12 @@ impl View {
     }
 }
 
+const SEPARATOR: u8 = 0x2C; // b','
+
 #[derive(Clone, Debug)]
 pub struct Peer {
     address: String,
-    age: u64,
+    age: u16,
 }
 
 impl Peer {
@@ -114,10 +119,42 @@ impl Peer {
     pub fn increment_age(&mut self) {
         self.age += 1;
     }
-    pub fn age(&self) -> u64 {
+    pub fn age(&self) -> u16 {
         self.age
     }
     pub fn address(&self) -> &str { &self.address }
+    pub fn as_bytes(&self) -> Vec<u8> {
+        // peer address
+        let mut v = self.address.as_bytes().to_vec();
+        // separator
+        v.push(SEPARATOR);
+        // peer age: first byte
+        v.push((self.age >> 8) as u8);
+        // peer age: second byte
+        v.push((self.age & 0xff) as u8);
+        v
+    }
+    pub fn from_bytes(bytes: &[u8]) -> Result<Peer, Box<Error>> {
+        // retrieve index of separator
+        let separator_index = bytes.iter().enumerate()
+            .find(|(_, b)| { **b == SEPARATOR})
+            .map(|(i, _)| {i});
+        if let Some(index) = separator_index {
+            // check that there are two bytes for the age after the separator
+            if bytes.len() != index + 3 {
+                Err("invalid age")?
+            }
+            let address = String::from_utf8(bytes[..index].to_vec())?;
+            let age = (bytes[index+1] as u16) << 8 + bytes[index+2] as u16;
+            Ok(Peer{
+                address,
+                age,
+            })
+        }
+        else {
+            Err("address separator not found")?
+        }
+    }
 }
 impl PartialEq for Peer {
     fn eq(&self, other: &Self) -> bool {
@@ -147,7 +184,7 @@ impl PeerSamplingService {
         }
 
         // listen to incoming message
-        let listener_handler = self.start_listener(&self.config.bind_address);
+        let listener_handler = crate::network::start_listener(&self.config.bind_address);
 
         // start peer sampling
         let sampling_handler = self.start_sampling_activity();
@@ -175,38 +212,21 @@ impl PeerSamplingService {
                         view.permute();
                         view.move_oldest_to_end(config.healing_factor);
                         buffer.append(&mut view.head(config.view_size));
-                        if let Ok(_) = crate::network::send(peer, buffer) {
-                            log::debug!("Message sent");
-                        }
-                        else {
-                            log::error!("Message not sent");
+                        match crate::network::send(&peer.address, Message::new_push(Some(buffer))) {
+                            Ok(()) => log::debug!("Buffer sent successfully"),
+                            Err(e) => log::error!("Error sending buffer: {}", e),
                         }
                     }
                     else {
-                        // TODO: send null to p
+                        // send empty view to trigger response
+                        match crate::network::send(&peer.address, Message::new_push(None)) {
+                            Ok(()) => log::debug!("Empty view sent successfully"),
+                            Err(e) => log::error!("Error sending empty view: {}", e),
+                        }
                     }
                 }
                 else {
                     log::warn!("No peer found for sampling")
-                }
-            }
-        }).unwrap()
-    }
-
-    fn start_listener(&self, bind_address: &str) -> JoinHandle<()>{
-        let listener = TcpListener::bind(bind_address).expect("error whith bind address");
-        log::info!("Started listener on {}", bind_address);
-        std::thread::Builder::new().name(bind_address.to_string()).spawn(move ||{
-            for incoming_stream in listener.incoming() {
-                if let Ok(mut stream) = incoming_stream {
-                    let mut buf = Vec::new();
-                    if let Ok(count) = stream.read_to_end(&mut buf) {
-                        let msg = String::from_utf8(buf.clone()).unwrap();
-                        log::debug!("Received: {}", msg);
-                    }
-                }
-                else {
-                    log::error!("Error with incoming connection");
                 }
             }
         }).unwrap()
