@@ -1,54 +1,15 @@
+mod debug;
 mod message;
 mod network;
 mod conf;
 mod peer;
 
-const NODES: [char; 33] = [
-    '🦋',
-
-    '🌶',
-    '🌽',
-    '🥔',
-    '🥦',
-    '🧄',
-    '🥨',
-    '🍔',
-    '🌶',
-
-    '🥕',
-    '🍆',
-    '🧅',
-    '🥒',
-    '🥜',
-    '🥐',
-    '🥩',
-    '🍠',
-
-    '🍡',
-    '🦀',
-    '🦪',
-    '🍦',
-    '🍰',
-    '🧁',
-    '🍯',
-    '🍷',
-
-    '🍺',
-    '🥛',
-    '🍫',
-    '🦑',
-    '🥟',
-    '🍚',
-    '🍱',
-    '🍕',
-];
-
 #[cfg(test)]
 mod tests {
     use crate::peer::{Config, PeerSamplingService, Peer};
-    use crate::{conf, NODES};
+    use crate::conf;
     use std::thread::JoinHandle;
-    use std::borrow::Borrow;
+    use crate::debug::NODES;
 
 
     #[test]
@@ -66,7 +27,7 @@ mod tests {
         first.join().unwrap();
     }
 
-    fn start_node(config: Config, init_handler: Box<FnOnce() -> Option<Peer>>) -> JoinHandle<()> {
+    fn start_node(config: Config, init_handler: Box<dyn FnOnce() -> Option<Peer>>) -> JoinHandle<()> {
         let mut service = PeerSamplingService::new(config);
         service.init(init_handler)
     }
@@ -74,7 +35,7 @@ mod tests {
     fn get_nodes() -> Vec<(Config, Box<dyn FnOnce() -> Option<Peer>>)> {
         let push = true;
         let pull = true;
-        let T = 5;
+        let t = 5;
         let c = 6;
         let h = 1;
         let s = 2;
@@ -83,7 +44,7 @@ mod tests {
         let mut port = 9000;
         let init_port = 9000;
         result.push(
-            (Config::new('🦋', format!("127.0.0.1:{}", port), push, pull, T, c, h, s),
+            (Config::new('🦋', format!("127.0.0.1:{}", port), push, pull, t, c, h, s),
              Box::new(|| { None }))
         );
         port += 1;
@@ -91,7 +52,7 @@ mod tests {
         for icon in 1..NODES.len() {
             let address = format!("127.0.0.1:{}", port);
             port += 1;
-            result.push((Config::new(NODES[icon], address, push, pull, T, c, h, s),
+            result.push((Config::new(NODES[icon], address, push, pull, t, c, h, s),
                          Box::new(move|| { Some(Peer::new(format!("127.0.0.1:{}", init_port))) })));
         }
         result

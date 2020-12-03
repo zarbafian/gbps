@@ -1,9 +1,8 @@
-use std::net::{TcpStream, TcpListener, SocketAddr};
+use std::net::{TcpStream, TcpListener};
 use std::error::Error;
 use std::io::{Read, Write};
 use std::thread::JoinHandle;
 
-use crate::peer::Peer;
 use crate::message::Message;
 use std::sync::mpsc::Sender;
 
@@ -16,7 +15,9 @@ pub fn start_listener(bind_address: &str, sender: Sender<Message>) -> JoinHandle
                 let mut buf = Vec::new();
                 if let Ok(count) = stream.read_to_end(&mut buf) {
                     if let Ok(message) = Message::from_bytes(&buf) {
-                        sender.send(message);
+                        if let Err(e) = sender.send(message) {
+                            log::error!("Error transmitting message to receiver thread: {}", e);
+                        }
                     }
                 }
             } else {

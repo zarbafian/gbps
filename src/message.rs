@@ -1,6 +1,6 @@
 use crate::peer::Peer;
 use std::error::Error;
-use std::fmt::{Display, Formatter, Debug};
+use std::fmt::{Formatter, Debug};
 
 const MSG_TYPE_REQ: u8 = 0x80; // 0b1000000
 const MSG_TYPE_RESP: u8 = 0x00;
@@ -87,7 +87,7 @@ impl Message {
         buffer
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<Message, Box<Error>> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Message, Box<dyn Error>> {
         // message type
         let message_type = match bytes[0] & MASK_MSG_TYPE {
             MSG_TYPE_REQ => MessageType::Request,

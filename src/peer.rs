@@ -2,8 +2,6 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 use std::collections::{VecDeque, HashSet};
 use std::sync::{Arc, Mutex};
-use std::net::{TcpListener, TcpStream};
-use std::io::Read;
 use std::error::Error;
 use std::sync::mpsc::Receiver;
 
@@ -12,7 +10,6 @@ use rand::seq::SliceRandom;
 
 use crate::message::{Message, MessageType};
 use std::hash::{Hash, Hasher};
-use crate::NODES;
 
 #[derive(Clone)]
 pub struct Config {
@@ -114,12 +111,8 @@ impl View {
         self.remove_head(c, s);
         self.remove_at_random(c);
 
-        let new_peers = self.peers.iter()
-            .map(|peer| &peer.address[(peer.address.len()-2)..])
-            .map(|digits| digits.parse::<usize>().unwrap())
-            .map(|index| NODES[index])
-            .collect::<Vec<char>>();
-        log::info!("my new peers: {:?}", new_peers);
+        // TODO
+        crate::debug::print_peers(&self.peers);
     }
 
     fn remove_duplicates(&mut self) {
