@@ -10,6 +10,7 @@ use rand::seq::SliceRandom;
 use crate::message::Message;
 use std::error::Error;
 use std::ops::Index;
+use std::sync::mpsc::Receiver;
 
 #[derive(Clone)]
 pub struct Config {
@@ -92,6 +93,9 @@ impl View {
             head.push(self.peers[i].clone());
         }
         head
+    }
+    fn select(&self, c:usize, h: usize, s: usize, buffer: Vec<Peer>) {
+        // TODO
     }
 
     pub fn get_peer(&mut self) -> Option<Peer> {
@@ -184,7 +188,9 @@ impl PeerSamplingService {
         }
 
         // listen to incoming message
-        let listener_handler = crate::network::start_listener(&self.config.bind_address);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let listener_handler = crate::network::start_listener(&self.config.bind_address, tx);
+        let receiver_handler = self.start_receiver(rx);
 
         // start peer sampling
         let sampling_handler = self.start_sampling_activity();
@@ -196,6 +202,16 @@ impl PeerSamplingService {
 
     pub fn get_peer(&mut self) -> Option<&Peer> {
         None
+    }
+
+    fn start_receiver(&self, receiver: Receiver<Message>) -> JoinHandle<()> {
+        std::thread::Builder::new().name("message receiver".to_string()).spawn(move|| {
+            loop {
+                if let Ok(message) = receiver.recv() {
+                    log::debug!("Received: {:?}", message);
+                }
+            }
+        }).unwrap()
     }
 
     fn start_sampling_activity(&self) -> JoinHandle<()> {

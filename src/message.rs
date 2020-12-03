@@ -6,21 +6,6 @@ const MSG_TYPE_PULL: u8 = 0x00;
 
 const MASK_MSG_TYPE: u8 = 0x80; // 0b1000000
 
-#[test]
-fn bin_hexa() {
-    println!("---------------------------------------------");
-    println!("---------------------------------------------");
-    println!("---------------------------------------------");
-    println!("{:x}, {:x}", 0xabcd as u16 & 0xFF00, 0xabcd as u16 & 0x00FF);
-    println!("{:x}, {:x}, {:x}", 0b1000_0000, 0b0100_0000, 0b0000_1111);
-    println!("---------------------------------------------");
-    println!("{:x}, {:x}, {:x}", 0xabcd, 0xabcd >> 8, 0xabcd & 0xff);
-    println!("{:b}, {:x}", b',', b',');
-    println!("---------------------------------------------");
-    println!("{:x}, {:x}, {:x}", 0xabcd, 0xab << 8, (0xab << 8) + 0xcd);
-    println!("---------------------------------------------");
-}
-
 #[derive(Debug)]
 enum MessageType {
     Push, Pull
