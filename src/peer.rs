@@ -1,20 +1,23 @@
 use std::thread::JoinHandle;
 use std::time::Duration;
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashSet};
 use std::sync::{Arc, Mutex};
 use std::net::{TcpListener, TcpStream};
 use std::io::Read;
+use std::error::Error;
+use std::sync::mpsc::Receiver;
 
 use rand::Rng;
 use rand::seq::SliceRandom;
-use crate::message::Message;
-use std::error::Error;
-use std::ops::Index;
-use std::sync::mpsc::Receiver;
+
+use crate::message::{Message, MessageType};
+use std::hash::{Hash, Hasher};
+use crate::NODES;
 
 #[derive(Clone)]
 pub struct Config {
 
+    icon: char,
     bind_address: String,
 
     push: bool,
@@ -26,8 +29,9 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(bind_address: String, push: bool, pull: bool, sampling_period: u64, view_size: usize, healing_factor: usize, swapping_factor: usize) -> Config {
+    pub fn new(icon: char, bind_address: String, push: bool, pull: bool, sampling_period: u64, view_size: usize, healing_factor: usize, swapping_factor: usize) -> Config {
         Config {
+            icon,
             bind_address,
             push,
             pull,
@@ -40,12 +44,14 @@ impl Config {
 }
 
 struct View {
+    address: String,
     peers: Vec<Peer>,
     queue: VecDeque<Peer>,
 }
 impl View {
-    fn new() -> View {
+    fn new(address: String) -> View {
         View {
+            address,
             peers: vec![],
             queue: VecDeque::new(),
         }
@@ -87,15 +93,84 @@ impl View {
         }
     }
     fn head(&self, c: usize) -> Vec<Peer> {
-        let count = std::cmp::min(c / 2 - 1, self.peers.len() - 1);
+        let count = std::cmp::min(c / 2 - 1, self.peers.len());
         let mut head = Vec::new();
         for i in 0..count {
             head.push(self.peers[i].clone());
         }
         head
     }
-    fn select(&self, c:usize, h: usize, s: usize, buffer: Vec<Peer>) {
-        // TODO
+    fn increase_age(&mut self) {
+        for peer in self.peers.iter_mut() {
+            peer.age += 1;
+        }
+    }
+    fn select(&mut self, c:usize, h: usize, s: usize, buffer: &Vec<Peer>) {
+        let my_address = self.address.clone();
+        log::debug!("my initial peers: {:?}", self.peers);
+        buffer.iter().filter(|peer| peer.address != my_address).for_each(|peer| self.peers.push(peer.clone()));
+        self.remove_duplicates();
+        self.remove_old_items(c, h);
+        self.remove_head(c, s);
+        self.remove_at_random(c);
+
+        let new_peers = self.peers.iter()
+            .map(|peer| &peer.address[(peer.address.len()-2)..])
+            .map(|digits| digits.parse::<usize>().unwrap())
+            .map(|index| NODES[index])
+            .collect::<Vec<char>>();
+        log::info!("my new peers: {:?}", new_peers);
+    }
+
+    fn remove_duplicates(&mut self) {
+        let mut unique_peers: HashSet<Peer> = HashSet::new();
+        self.peers.iter().for_each(|peer| {
+            if let Some(entry) = unique_peers.get(peer) {
+                if peer.age < entry.age {
+                    unique_peers.replace(peer.clone());
+                }
+            }
+            else {
+                unique_peers.insert(peer.clone());
+            }
+        });
+        self.peers.clear();
+        for peer in unique_peers {
+            self.peers.push(peer)
+        };
+    }
+    fn remove_old_items(&mut self, c: usize, h: usize) {
+        let min = if self.peers.len() > c { self.peers.len() - c } else { 0 };
+        let removal_count = std::cmp::min(h, min);
+        if removal_count > 0 {
+            let mut sorted_by_age = self.peers.clone();
+            sorted_by_age.sort_by_key(|peer| peer.age);
+            sorted_by_age.truncate(sorted_by_age.len() - removal_count);
+            let mut new_view = vec![];
+            for peer in &self.peers {
+                if sorted_by_age.contains(&peer) {
+                    new_view.push(peer.clone());
+                }
+            }
+            self.peers = new_view;
+        }
+    }
+    fn remove_head(&mut self, c: usize, s: usize) {
+        let min = if self.peers.len() > c { self.peers.len() - c } else { 0 };
+        let removal_count = std::cmp::min(s, min);
+        if removal_count > 0 {
+            for _ in 0..removal_count {
+                self.peers.remove(0);
+            }
+        }
+    }
+    fn remove_at_random(&mut self, c: usize) {
+        if self.peers.len() > c {
+            for _ in 0..(self.peers.len() - c) {
+                let remove_index = rand::thread_rng().gen_range(0, self.peers.len());
+                self.peers.remove(remove_index);
+            }
+        }
     }
 
     pub fn get_peer(&mut self) -> Option<Peer> {
@@ -135,10 +210,10 @@ impl Peer {
         // peer age: first byte
         v.push((self.age >> 8) as u8);
         // peer age: second byte
-        v.push((self.age & 0xff) as u8);
+        v.push((self.age & 0x00FF) as u8);
         v
     }
-    pub fn from_bytes(bytes: &[u8]) -> Result<Peer, Box<Error>> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Peer, Box<dyn Error>> {
         // retrieve index of separator
         let separator_index = bytes.iter().enumerate()
             .find(|(_, b)| { **b == SEPARATOR})
@@ -149,7 +224,7 @@ impl Peer {
                 Err("invalid age")?
             }
             let address = String::from_utf8(bytes[..index].to_vec())?;
-            let age = (bytes[index+1] as u16) << 8 + bytes[index+2] as u16;
+            let age = ((bytes[index+1] as u16) << 8 ) + (bytes[index+2] as u16);
             Ok(Peer{
                 address,
                 age,
@@ -160,24 +235,32 @@ impl Peer {
         }
     }
 }
+impl Eq for Peer {
+
+}
 impl PartialEq for Peer {
     fn eq(&self, other: &Self) -> bool {
         self.address == other.address
     }
 }
+impl Hash for Peer {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.address.hash(state)
+    }
+}
+
 pub struct PeerSamplingService {
     config: Config,
     view: Arc<Mutex<View>>,
 }
 
-//type InitHandler = Box<dyn FnOnce() + Send + 'static>;
-
 impl PeerSamplingService {
 
     pub fn new(config: Config) -> PeerSamplingService {
+        let view_address = config.bind_address.clone();
         PeerSamplingService {
+            view: Arc::new(Mutex::new(View::new(view_address))),
             config,
-            view: Arc::new(Mutex::new(View::new())),
         }
     }
 
@@ -201,45 +284,71 @@ impl PeerSamplingService {
     }
 
     pub fn get_peer(&mut self) -> Option<&Peer> {
-        None
+        unimplemented!()
     }
 
+    fn build_buffer(config: &Config, view: &mut View) -> Vec<Peer> {
+        let mut buffer = vec![ Peer::new(config.bind_address.clone()) ];
+        view.permute();
+        view.move_oldest_to_end(config.healing_factor);
+        buffer.append(&mut view.head(config.view_size));
+        buffer
+    }
     fn start_receiver(&self, receiver: Receiver<Message>) -> JoinHandle<()> {
-        std::thread::Builder::new().name("message receiver".to_string()).spawn(move|| {
-            loop {
-                if let Ok(message) = receiver.recv() {
-                    log::debug!("Received: {:?}", message);
+        let config = self.config.clone();
+        let view_arc = self.view.clone();
+        std::thread::Builder::new().name(format!("{} {}  - msg rx", config.icon, config.bind_address)).spawn(move|| {
+            while let Ok(message) = receiver.recv() {
+                log::debug!("Received: {:?}", message);
+                let mut view = view_arc.lock().unwrap();
+                if let MessageType::Request = message.message_type() {
+                    if config.pull {
+                        let buffer = Self::build_buffer(&config, &mut view);
+                        log::debug!("built response buffer: {:?}", buffer);
+                        match crate::network::send(&message.sender(), Message::new_response(config.bind_address.clone(), Some(buffer))) {
+                            Ok(()) => log::debug!("Buffer sent successfully"),
+                            Err(e) => log::error!("Error sending buffer: {}", e),
+                        }
+                    }
                 }
+
+                if let Some(buffer) = message.view() {
+                    view.select(config.view_size, config.healing_factor, config.swapping_factor, &buffer);
+                }
+                else {
+                    log::warn!("received a response with an empty buffer");
+                }
+
+                view.increase_age();
             }
         }).unwrap()
     }
 
     fn start_sampling_activity(&self) -> JoinHandle<()> {
         let config = self.config.clone();
-        let arc = self.view.clone();
-        std::thread::Builder::new().name(config.bind_address.clone()).spawn(move || {
+        let view_arc = self.view.clone();
+        std::thread::Builder::new().name(format!("{} {} - sampling", config.icon, config.bind_address)).spawn(move || {
             loop {
                 std::thread::sleep(Duration::from_secs(config.sampling_period));
                 log::debug!("Starting sampling protocol");
-                let mut view = arc.lock().unwrap();
+                let mut view = view_arc.lock().unwrap();
                 if let Some(peer) = view.select_peer() {
                     if config.push {
-                        let mut buffer = vec![ Peer::new(config.bind_address.clone()) ];
-                        view.permute();
-                        view.move_oldest_to_end(config.healing_factor);
-                        buffer.append(&mut view.head(config.view_size));
-                        match crate::network::send(&peer.address, Message::new_push(Some(buffer))) {
+                        let buffer = Self::build_buffer(&config, &mut view);
+                        // send local view
+                        match crate::network::send(&peer.address, Message::new_request(config.bind_address.clone(), Some(buffer))) {
                             Ok(()) => log::debug!("Buffer sent successfully"),
                             Err(e) => log::error!("Error sending buffer: {}", e),
                         }
                     }
                     else {
                         // send empty view to trigger response
-                        match crate::network::send(&peer.address, Message::new_push(None)) {
+                        match crate::network::send(&peer.address, Message::new_request(config.bind_address.clone(), None)) {
                             Ok(()) => log::debug!("Empty view sent successfully"),
                             Err(e) => log::error!("Error sending empty view: {}", e),
                         }
                     }
+                    view.increase_age();
                 }
                 else {
                     log::warn!("No peer found for sampling")

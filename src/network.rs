@@ -10,7 +10,7 @@ use std::sync::mpsc::Sender;
 pub fn start_listener(bind_address: &str, sender: Sender<Message>) -> JoinHandle<()> {
     let listener = TcpListener::bind(bind_address).expect("error whith bind address");
     log::info!("Started listener on {}", bind_address);
-    std::thread::Builder::new().name(bind_address.to_string()).spawn(move || {
+    std::thread::Builder::new().name(format!("{} - listener", bind_address)).spawn(move || {
         for incoming_stream in listener.incoming() {
             if let Ok(mut stream) = incoming_stream {
                 let mut buf = Vec::new();
@@ -33,6 +33,6 @@ pub fn send(address: &str, message: Message) -> Result<(), Box<dyn Error>> {
         //.expect(&format!("Couldn't connect to the peer {}", peer.address()));
 
     let written = stream.write(&message.as_bytes())?;
-    log::debug!("Written {} bytes", written);
+    //log::debug!("Written {} bytes", written);
     Ok(())
 }
