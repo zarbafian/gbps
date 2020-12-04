@@ -4,37 +4,34 @@ use std::fmt::{Formatter, Debug};
 
 const MSG_TYPE_REQ: u8 = 0x80; // 0b1000000
 const MSG_TYPE_RESP: u8 = 0x00;
-
 const MASK_MSG_TYPE: u8 = 0x80; // 0b1000000
 
-//#[derive(Debug)]
+/// The message type
+#[derive(Debug)]
 pub enum MessageType {
     Request,
     Response
 }
-impl Debug for MessageType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let value = match self {
-            MessageType::Request => "Request 🗞",
-            MessageType::Response => "Response 📬",
-        };
-        write!(f, "{}", value)
-    }
-}
 
+/// A peer sampling protocol message
 #[derive(Debug)]
 pub struct Message {
+    /// Address of the sender
     sender: String,
+    /// Type of the message
     message_type: MessageType,
+    /// The view of the sender
     view: Option<Vec<Peer>>,
 }
 
 impl Message {
 
+    /// Creates a new message of type [MessageType::Request] containing a view
     pub fn new_request(sender: String, view: Option<Vec<Peer>>) -> Message {
         Self::new(sender, MessageType::Request, view)
     }
 
+    /// Creates a new message of type [MessageType::Response] containing a view
     pub fn new_response(sender: String, view: Option<Vec<Peer>>) -> Message {
         Self::new(sender, MessageType::Response, view)
     }
@@ -47,17 +44,22 @@ impl Message {
         }
     }
 
+    /// Returns the message sender
     pub fn sender(&self) -> &str {
         &self.sender
     }
+
+    /// Returns the message type
     pub fn message_type(&self) -> &MessageType{
         &self.message_type
     }
 
+    /// Returns the view contained in the message
     pub fn view(&self) -> &Option<Vec<Peer>> {
         &self.view
     }
 
+    /// Serializes the message to a vector of bytes
     pub fn as_bytes(&self) -> Vec<u8> {
         let mut buffer = vec![];
         // first byte: message type
@@ -87,6 +89,11 @@ impl Message {
         buffer
     }
 
+    /// Deserializes a message from bytes
+    ///
+    /// # Arguments
+    ///
+    /// * `bytes` - A message serialized as bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Message, Box<dyn Error>> {
         // message type
         let message_type = match bytes[0] & MASK_MSG_TYPE {

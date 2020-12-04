@@ -59,7 +59,11 @@ struct View {
     queue: VecDeque<Peer>,
 }
 impl View {
-    /// Creates a new view for with the node's address
+    /// Creates a new view with the node's address
+    ///
+    /// # Arguments
+    ///
+    /// * `address` - Addres of peer
     fn new(address: String) -> View {
         View {
             address,
@@ -251,16 +255,33 @@ pub struct Peer {
 }
 
 impl Peer {
+    /// Creates a new peer with the specified address and age 0
+    ///
+    /// # Arguments
+    ///
+    /// * `address` - Network address of peer
     pub fn new(address: String) -> Peer {
         Peer {address, age: 0}
     }
+
+    /// Increments the age of peer by one
     pub fn increment_age(&mut self) {
-        self.age += 1;
+        if self.age < u16::max_value() {
+            self.age += 1;
+        }
     }
+
+    /// Returns the age of peer
     pub fn age(&self) -> u16 {
         self.age
     }
+
+    /// Returns the address of peer
     pub fn address(&self) -> &str { &self.address }
+
+    /// Serializes peer into an array of bytes.
+    /// Starts with the address of the peer first followed by the age of the peer
+    /// Address and age are separated by a [SEPARATOR] byte.
     pub fn as_bytes(&self) -> Vec<u8> {
         // peer address
         let mut v = self.address.as_bytes().to_vec();
@@ -272,17 +293,25 @@ impl Peer {
         v.push((self.age & 0x00FF) as u8);
         v
     }
+
+    /// Deserializes a peer from an array of bytes
+    ///
+    /// # Arguments
+    ///
+    /// * `bytes` - A peer serialized as bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Peer, Box<dyn Error>> {
         // retrieve index of separator
         let separator_index = bytes.iter().enumerate()
             .find(|(_, b)| { **b == SEPARATOR})
             .map(|(i, _)| {i});
         if let Some(index) = separator_index {
-            // check that there are two bytes for the age after the separator
+            // check that there are exactly two bytes for the age after separator
             if bytes.len() != index + 3 {
                 Err("invalid age")?
             }
+            // retrieve address
             let address = String::from_utf8(bytes[..index].to_vec())?;
+            // build age
             let age = ((bytes[index+1] as u16) << 8 ) + (bytes[index+2] as u16);
             Ok(Peer{
                 address,
@@ -290,13 +319,11 @@ impl Peer {
             })
         }
         else {
-            Err("address separator not found")?
+            Err("peer separator not found")?
         }
     }
 }
-impl Eq for Peer {
-
-}
+impl Eq for Peer {}
 impl PartialEq for Peer {
     fn eq(&self, other: &Self) -> bool {
         self.address == other.address
@@ -308,24 +335,36 @@ impl Hash for Peer {
     }
 }
 
+/// Peer sampling service to by used by application
 pub struct PeerSamplingService {
+    /// Protocol parameters
     config: Config,
+    /// View containing a list of other peers
     view: Arc<Mutex<View>>,
 }
 
 impl PeerSamplingService {
 
+    /// Create a new peer sampling service with provided parameters
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The parameters for the peer sampling protocol
     pub fn new(config: Config) -> PeerSamplingService {
-        let view_address = config.bind_address.clone();
         PeerSamplingService {
-            view: Arc::new(Mutex::new(View::new(view_address))),
+            view: Arc::new(Mutex::new(View::new(config.bind_address.clone()))),
             config,
         }
     }
 
-    pub fn init(&mut self, init: Box<dyn FnOnce() -> Option<Peer>>) -> JoinHandle<()> {
-        // get address of initial peer(s)
-        if let Some(initial_peer) = init() {
+    /// Initializes service
+    ///
+    /// # Arguments
+    ///
+    /// * `initial_peer` - A closure returning the initial peer for starting the protocol
+    pub fn init(&mut self, initial_peer: Box<dyn FnOnce() -> Option<Peer>>) -> JoinHandle<()> {
+        // get address of initial peer
+        if let Some(initial_peer) = initial_peer() {
             self.view.lock().unwrap().peers.push(initial_peer);
         }
 
@@ -342,10 +381,19 @@ impl PeerSamplingService {
         //sampling_handler.join().unwrap();
     }
 
+    /// Returns a random peer for the client application
+    /// The peer is pseudo-random peer from the set of all peers
+    /// The local view is built using [Gossip-Based Peer Sampling]
     pub fn get_peer(&mut self) -> Option<&Peer> {
         unimplemented!()
     }
 
+    /// Builds the view to be exchanged with another peer
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The configuration parameters
+    /// * `view` - The current view
     fn build_buffer(config: &Config, view: &mut View) -> Vec<Peer> {
         let mut buffer = vec![ Peer::new(config.bind_address.clone()) ];
         view.permute();
@@ -353,6 +401,12 @@ impl PeerSamplingService {
         buffer.append(&mut view.head(config.view_size));
         buffer
     }
+
+    /// Creates a thread for handling messages
+    ///
+    /// # Arguments
+    ///
+    /// * `receiver` - The channel used for receiving incoming messages
     fn start_receiver(&self, receiver: Receiver<Message>) -> JoinHandle<()> {
         let config = self.config.clone();
         let view_arc = self.view.clone();
@@ -383,6 +437,7 @@ impl PeerSamplingService {
         }).unwrap()
     }
 
+    /// Creates a thread that periodically executes the peer sampling
     fn start_sampling_activity(&self) -> JoinHandle<()> {
         let config = self.config.clone();
         let view_arc = self.view.clone();
