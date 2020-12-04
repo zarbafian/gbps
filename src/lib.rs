@@ -1,4 +1,3 @@
-mod debug;
 mod message;
 mod network;
 mod conf;
@@ -9,8 +8,6 @@ mod tests {
     use crate::peer::{Config, PeerSamplingService, Peer};
     use crate::conf;
     use std::thread::JoinHandle;
-    use crate::debug::NODES;
-
 
     #[test]
     fn initial_peer() {
@@ -44,15 +41,15 @@ mod tests {
         let mut port = 9000;
         let init_port = 9000;
         result.push(
-            (Config::new('🦋', format!("127.0.0.1:{}", port), push, pull, t, c, h, s),
+            (Config::new(format!("127.0.0.1:{}", port), push, pull, t, c, h, s),
              Box::new(|| { None }))
         );
         port += 1;
 
-        for icon in 1..NODES.len() {
+        for icon in 1..33 {
             let address = format!("127.0.0.1:{}", port);
             port += 1;
-            result.push((Config::new(NODES[icon], address, push, pull, t, c, h, s),
+            result.push((Config::new(address, push, pull, t, c, h, s),
                          Box::new(move|| { Some(Peer::new(format!("127.0.0.1:{}", init_port))) })));
         }
         result

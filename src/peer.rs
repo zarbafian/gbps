@@ -4,6 +4,7 @@ use std::collections::{VecDeque, HashSet};
 use std::sync::{Arc, Mutex};
 use std::error::Error;
 use std::sync::mpsc::Receiver;
+use std::iter::FromIterator;
 
 use rand::Rng;
 use rand::seq::SliceRandom;
@@ -11,24 +12,32 @@ use rand::seq::SliceRandom;
 use crate::message::{Message, MessageType};
 use std::hash::{Hash, Hasher};
 
+/// The peer sampling parameters
+///
+/// See: https://infoscience.epfl.ch/record/109297/files/all.pdf
 #[derive(Clone)]
 pub struct Config {
-
-    icon: char,
+    /// Bind address for listening to incoming connections
     bind_address: String,
-
+    /// Does the node push its view to other peers
     push: bool,
+    /// When active, if the node will pull views from other peers
+    /// When passive, if it responds with its view to pull from other peers
     pull: bool,
+    /// The interval between each cycle of push/pull
     sampling_period: u64,
+    /// The number of peers in the node's view
     view_size: usize,
+    /// The number of removal at each cycle
     healing_factor: usize,
+    /// The number of peer swapped at each cycle
     swapping_factor: usize,
 }
 
 impl Config {
-    pub fn new(icon: char, bind_address: String, push: bool, pull: bool, sampling_period: u64, view_size: usize, healing_factor: usize, swapping_factor: usize) -> Config {
+    /// Returns a configuration with specified parameters
+    pub fn new(bind_address: String, push: bool, pull: bool, sampling_period: u64, view_size: usize, healing_factor: usize, swapping_factor: usize) -> Config {
         Config {
-            icon,
             bind_address,
             push,
             pull,
@@ -40,12 +49,17 @@ impl Config {
     }
 }
 
+/// The view at each node
 struct View {
+    /// The address of the node
     address: String,
+    /// The list of peers the node is aware of
     peers: Vec<Peer>,
+    /// The queue from which peer are retrieved for the application layer
     queue: VecDeque<Peer>,
 }
 impl View {
+    /// Creates a new view for with the node's address
     fn new(address: String) -> View {
         View {
             address,
@@ -53,6 +67,8 @@ impl View {
             queue: VecDeque::new(),
         }
     }
+
+    /// Randomly select a peer for exchanging views at each cycle
     fn select_peer(&self) -> Option<Peer> {
         if self.peers.is_empty() {
             None
@@ -68,6 +84,12 @@ impl View {
         self.peers.shuffle(&mut rand::thread_rng());
     }
 
+    /// Move the oldest peers to the end of the view if the size
+    /// of the view is larger than the argument
+    ///
+    /// # Arguments
+    ///
+    /// * `h` - The number of peer that should be moved
     fn move_oldest_to_end(&mut self, h: usize) {
         if self.peers.len() > h {
             let mut sorted_by_age = self.peers.clone();
@@ -89,6 +111,12 @@ impl View {
             self.peers = view_start;
         }
     }
+
+    /// Returns the peers at the beginning of the view
+    ///
+    /// # Arguments
+    ///
+    /// * `c` - The size of the view
     fn head(&self, c: usize) -> Vec<Peer> {
         let count = std::cmp::min(c / 2 - 1, self.peers.len());
         let mut head = Vec::new();
@@ -97,41 +125,64 @@ impl View {
         }
         head
     }
+
+    /// Increases by one the age of each peer in the view
     fn increase_age(&mut self) {
         for peer in self.peers.iter_mut() {
             peer.age += 1;
         }
     }
+
+    /// Merge a view received received from a peer with the current view
+    ///
+    /// # Arguments
+    ///
+    /// * `c` - The size of the view
+    /// * `h` - The healing parameter
+    /// * `s` - The swap parameter
+    /// * `buffer` - The view received
     fn select(&mut self, c:usize, h: usize, s: usize, buffer: &Vec<Peer>) {
         let my_address = self.address.clone();
-        log::debug!("my initial peers: {:?}", self.peers);
-        buffer.iter().filter(|peer| peer.address != my_address).for_each(|peer| self.peers.push(peer.clone()));
+        // Add received peers to current view, omitting the node's own address
+        buffer.iter()
+            .filter(|peer| peer.address != my_address)
+            .for_each(|peer| self.peers.push(peer.clone()));
         self.remove_duplicates();
         self.remove_old_items(c, h);
         self.remove_head(c, s);
         self.remove_at_random(c);
 
-        // TODO
-        crate::debug::print_peers(&self.peers);
+        let new_view = self.peers.iter()
+            .map(|peer| &peer.address[peer.address.len()-4..])
+            .collect::<Vec<&str>>().join(", ");
+        log::info!("{}", new_view);
     }
 
+    /// Removes duplicates peers from the view by keeping the most recent one
     fn remove_duplicates(&mut self) {
         let mut unique_peers: HashSet<Peer> = HashSet::new();
         self.peers.iter().for_each(|peer| {
             if let Some(entry) = unique_peers.get(peer) {
+                // duplicate peer, check age
                 if peer.age < entry.age {
                     unique_peers.replace(peer.clone());
                 }
             }
             else {
+                // unique peer
                 unique_peers.insert(peer.clone());
             }
         });
-        self.peers.clear();
-        for peer in unique_peers {
-            self.peers.push(peer)
-        };
+        let new_view = Vec::from_iter(unique_peers);
+        std::mem::replace(&mut self.peers, new_view);
     }
+
+    /// Removes the oldest items from the view based on the healing parameter
+    ///
+    /// # Arguments
+    ///
+    /// * `c` - The size of the view
+    /// * `h` - The healing parameter
     fn remove_old_items(&mut self, c: usize, h: usize) {
         let min = if self.peers.len() > c { self.peers.len() - c } else { 0 };
         let removal_count = std::cmp::min(h, min);
@@ -145,18 +196,27 @@ impl View {
                     new_view.push(peer.clone());
                 }
             }
-            self.peers = new_view;
+            std::mem::replace(&mut self.peers, new_view);
         }
     }
+
+    /// Removes peers at the beginning of the current view based on the swap parameter
+    ///
+    /// # Arguments
+    ///
+    /// * `c` - The size of the view
+    /// * `s` - The swap parameter
     fn remove_head(&mut self, c: usize, s: usize) {
         let min = if self.peers.len() > c { self.peers.len() - c } else { 0 };
         let removal_count = std::cmp::min(s, min);
-        if removal_count > 0 {
-            for _ in 0..removal_count {
-                self.peers.remove(0);
-            }
-        }
+        self.peers.drain(0..removal_count);
     }
+
+    /// Removes peers at random to match the view size parameter
+    ///
+    /// # Arguments
+    ///
+    /// * `c` - The size of the view
     fn remove_at_random(&mut self, c: usize) {
         if self.peers.len() > c {
             for _ in 0..(self.peers.len() - c) {
@@ -166,6 +226,8 @@ impl View {
         }
     }
 
+    /// Returns a random peer for use in the application layer
+    /// The peer is selected from the queue of fresh peer if  available
     pub fn get_peer(&mut self) -> Option<Peer> {
         if let Some(peer) = self.queue.pop_front() {
             Some(peer)
@@ -176,11 +238,15 @@ impl View {
     }
 }
 
+// Byte separator between the peer address and the peer age
 const SEPARATOR: u8 = 0x2C; // b','
 
+/// Information about a peer
 #[derive(Clone, Debug)]
 pub struct Peer {
+    /// Network address of the peer
     address: String,
+    /// Age of the peer
     age: u16,
 }
 
@@ -290,7 +356,7 @@ impl PeerSamplingService {
     fn start_receiver(&self, receiver: Receiver<Message>) -> JoinHandle<()> {
         let config = self.config.clone();
         let view_arc = self.view.clone();
-        std::thread::Builder::new().name(format!("{} {}  - msg rx", config.icon, config.bind_address)).spawn(move|| {
+        std::thread::Builder::new().name(format!("{} - msg rx", config.bind_address)).spawn(move|| {
             while let Ok(message) = receiver.recv() {
                 log::debug!("Received: {:?}", message);
                 let mut view = view_arc.lock().unwrap();
@@ -320,7 +386,7 @@ impl PeerSamplingService {
     fn start_sampling_activity(&self) -> JoinHandle<()> {
         let config = self.config.clone();
         let view_arc = self.view.clone();
-        std::thread::Builder::new().name(format!("{} {} - sampling", config.icon, config.bind_address)).spawn(move || {
+        std::thread::Builder::new().name(format!("{} - sampling", config.bind_address)).spawn(move || {
             loop {
                 std::thread::sleep(Duration::from_secs(config.sampling_period));
                 log::debug!("Starting sampling protocol");
