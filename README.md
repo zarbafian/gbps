@@ -1,5 +1,5 @@
 # Introduction
-In large distributed systems that use gossip protocols for communication, peers should be selected at random in the network. In theory, this requires a knowledge of all the participating nodes. [Gossip-based Peer Sampling](https://infoscience.epfl.ch/record/109297/files/all.pdf) [[1]] is an algorithm that solves the random peer selection problem.
+In large distributed systems that use gossip protocols for communication, peers should be selected at random in the network. In theory, this requires a knowledge of all the participating nodes. [Gossip-based Peer Sampling](https://infoscience.epfl.ch/record/109297/files/all.pdf) [[1]] is an algorithm by Jelasity et al that solves the random peer selection problem.
 
 This crate is a Rust implementation of the algorithm proposed by Jelasity et al [[1]]. It enables the creation of an overlay network for use in gossip protocols.
 
