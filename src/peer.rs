@@ -380,8 +380,8 @@ impl PeerSamplingService {
     /// Returns a random peer for the client application.
     /// The peer is pseudo-random peer from the set of all peers.
     /// The local view is built using [Gossip-Based Peer Sampling].
-    pub fn get_peer(&mut self) -> Option<&Peer> {
-        unimplemented!()
+    pub fn get_peer(&mut self) -> Option<Peer> {
+        self.view.lock().unwrap().get_peer()
     }
 
     /// Builds the view to be exchanged with another peer

@@ -31,7 +31,8 @@ mod tests {
         let no_peer_handler = Box::new(move|| { None });
 
         // create and initiate the peer sampling service
-        let mut join_handles = PeerSamplingService::new(first_config).init(no_peer_handler);
+        let mut service = PeerSamplingService::new(first_config);
+        let mut _join_handles = service.init(no_peer_handler);
 
         // create peers using IPv4 addresses
         let mut port = 9001;
@@ -62,6 +63,8 @@ mod tests {
             port += 1;
         }
 
-        join_handles.remove(0).join().unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(11));
+
+        assert!(service.get_peer().is_some());
     }
 }
