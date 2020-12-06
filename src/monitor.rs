@@ -1,7 +1,3 @@
-pub const MONITORING_ENABLED: bool = true;
-pub const MONITORING_HOST: &str = "127.0.0.1:8080";
-pub const MONITORING_CONTEXT: &str = "/peers";
-
 #[derive(Clone)]
 pub struct MonitoringConfig {
     enabled: bool,
@@ -39,7 +35,7 @@ impl Default for MonitoringConfig {
     }
 }
 
-pub fn send_data(pid: &str, peers: Vec<String>) {
+pub fn send_data(config: MonitoringConfig, pid: &str, peers: Vec<String>) {
 
     let pid = pid.to_owned();
     std::thread::spawn(move|| {
@@ -62,18 +58,18 @@ pub fn send_data(pid: &str, peers: Vec<String>) {
     });
 }
 
-fn post(json: String) -> std::io::Result<()> {
+fn post(config: MonitoringConfig, json: String) -> std::io::Result<()> {
     use std::io::Read;
     use std::io::Write;
 
     let bytes = json.as_bytes();
 
-    let mut stream = std::net::TcpStream::connect(MONITORING_HOST)?;
+    let mut stream = std::net::TcpStream::connect(config.host)?;
 
     let mut request_data = String::new();
-    request_data.push_str(&format!("POST {} HTTP/1.1", MONITORING_CONTEXT));
+    request_data.push_str(&format!("POST {} HTTP/1.1", config.context));
     request_data.push_str("\r\n");
-    request_data.push_str(&format!("Host: {}", MONITORING_HOST));
+    request_data.push_str(&format!("Host: {}", config.host));
     request_data.push_str("\r\n");
     request_data.push_str("Accept: */*");
     request_data.push_str("\r\n");
