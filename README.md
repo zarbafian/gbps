@@ -54,6 +54,6 @@ let mut handles = PeerSamplingService::new(second_config).init(init_handler);
 // handles.remove(0).join();
 ```
 Here is the result obtained with 61 local processes.
-(https://github.com/pouriya-zarbafian/gbps/demo.png)
+(https://github.com/pouriya-zarbafian/gbps/blob/master/demo.png)
 
 [1]: M. Jelasity, S. Voulgaris, R. Guerraoui, A.-M. Kermarrec, M. van Steen, Gossip-based Peer Sampling, 2007
