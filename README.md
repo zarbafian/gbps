@@ -57,4 +57,5 @@ Here is the result obtained with 61 local processes.
 
 ![alt text](https://github.com/pouriya-zarbafian/gbps/blob/master/demo.png "Example with 61 local nodes")
 
-[1]: M. Jelasity, S. Voulgaris, R. Guerraoui, A.-M. Kermarrec, M. van Steen, Gossip-based Peer Sampling, 2007
+[1]: https://infoscience.epfl.ch/record/109297/files/all.pdf
+M. Jelasity, S. Voulgaris, R. Guerraoui, A.-M. Kermarrec, M. van Steen, Gossip-based Peer Sampling, 2007
