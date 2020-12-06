@@ -1,14 +1,24 @@
 use std::io::Read;
 use std::io::Write;
 
+/// Configuration for sending protocol monitoring data
 #[derive(Clone)]
 pub struct MonitoringConfig {
+    /// Enable sending data
     enabled: bool,
+    /// Monitoring host
     host: String,
+    /// URL context
     context: String,
 }
 
 impl MonitoringConfig {
+    /// Creates a new monitoring configuration
+    ///
+    /// # Arguments
+    ///
+    /// * `enabled` - Share monitoring data
+    /// * `url` - URL of monitoring host
     pub fn new(enabled: bool, url: &str) -> MonitoringConfig {
         // remove leading protocol
         let protocol_removed = match url.find("://") {
@@ -31,6 +41,12 @@ impl MonitoringConfig {
         self.enabled
     }
 
+    /// Send monitoring data
+    ///
+    /// # Arguments
+    ///
+    /// * `pid` - Identifier of sending process
+    /// * `peers` - List of peers in the view of the process
     pub fn send_data(&self, pid: &str, peers: Vec<String>) {
         let pid = pid.to_owned();
         let host = self.host.clone();
@@ -78,11 +94,11 @@ impl MonitoringConfig {
 
         //println!("request_data = {:?}", request_data);
 
-        let request = stream.write_all(request_data.as_bytes())?;
+        let _request = stream.write_all(request_data.as_bytes())?;
         //println!("request = {:?}", request);
 
         let mut buf = String::new();
-        let result = stream.read_to_string(&mut buf)?;
+        let _result = stream.read_to_string(&mut buf)?;
         //println!("result = {}", result);
         //println!("buf = {}", buf);
 

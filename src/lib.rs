@@ -1,10 +1,11 @@
+mod config;
 mod monitor;
 mod message;
 mod network;
 mod peer;
 
+pub use crate::config::Config;
 pub use crate::peer::Peer;
-pub use crate::peer::Config;
 pub use crate::peer::PeerSamplingService;
 
 #[cfg(test)]
@@ -38,11 +39,11 @@ mod tests {
     fn get_nodes() -> Vec<(Config, Box<dyn FnOnce() -> Option<Peer>>)> {
         let push = true;
         let pull = true;
-        let t = 10;
-        let d = 10;
-        let c = 8;
+        let t = 5;
+        let d = 5;
+        let c = 4;
         let h = 1;
-        let s = 3;
+        let s = 2;
 
         let monitor = Some(MonitoringConfig::new(true, "127.0.0.1:8080/peers"));
 
@@ -50,13 +51,19 @@ mod tests {
         let mut port = 9000;
         let init_port = 9000;
         result.push(
-            (Config::new(format!("127.0.0.1:{}", port), push, pull, t, d, c, h, s, monitor.clone()),
+            (Config::new(format!("127.0.0.1:{}", port).parse().unwrap(), push, pull, t, d, c, h, s, monitor.clone()),
              Box::new(|| { None }))
         );
         port += 1;
 
-        for icon in 1..80 {
-            let address = format!("127.0.0.1:{}", port);
+        for icon in 1..10 {
+            let address = format!("127.0.0.1:{}", port).parse().unwrap();
+            port += 1;
+            result.push((Config::new(address, push, pull, t, d, c, h, s, monitor.clone()),
+                         Box::new(move|| { Some(Peer::new(format!("127.0.0.1:{}", init_port))) })));
+        }
+        for icon in 1..10 {
+            let address = format!("[::1]:{}", port).parse().unwrap();
             port += 1;
             result.push((Config::new(address, push, pull, t, d, c, h, s, monitor.clone()),
                          Box::new(move|| { Some(Peer::new(format!("127.0.0.1:{}", init_port))) })));

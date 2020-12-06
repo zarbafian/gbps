@@ -12,58 +12,13 @@ use rand::seq::SliceRandom;
 use crate::message::{Message, MessageType};
 use std::hash::{Hash, Hasher};
 use crate::monitor::MonitoringConfig;
-
-/// The peer sampling parameters
-///
-/// See: https://infoscience.epfl.ch/record/109297/files/all.pdf
-#[derive(Clone)]
-pub struct Config {
-    /// Bind address for listening to incoming connections
-    bind_address: String,
-    /// Does the node push its view to other peers
-    push: bool,
-    /// When active, if the node will pull views from other peers
-    /// When passive, if it responds with its view to pull from other peers
-    pull: bool,
-    /// The interval between each cycle of push/pull
-    sampling_period: u64,
-    /// Maximum value of random deviation from sampling interval
-    sampling_deviation: u64,
-    /// The number of peers in the node's view
-    view_size: usize,
-    /// The number of removal at each cycle
-    healing_factor: usize,
-    /// The number of peer swapped at each cycle
-    swapping_factor: usize,
-    /// Monitoring configuration
-    monitoring: MonitoringConfig,
-}
-
-impl Config {
-    /// Returns a configuration with specified parameters
-    pub fn new(bind_address: String, push: bool, pull: bool, sampling_period: u64, sampling_deviation: u64, view_size: usize, healing_factor: usize, swapping_factor: usize, monitoring_config: Option<MonitoringConfig>) -> Config {
-        let monitoring = match monitoring_config {
-            Some(config) => config,
-            None => MonitoringConfig::default(),
-        };
-        Config {
-            bind_address,
-            push,
-            pull,
-            sampling_period,
-            sampling_deviation,
-            view_size,
-            healing_factor,
-            swapping_factor,
-            monitoring
-        }
-    }
-}
+use crate::config::Config;
+use std::net::SocketAddr;
 
 /// The view at each node
 struct View {
     /// The address of the node
-    address: String,
+    host_address: String,
     /// The list of peers the node is aware of
     peers: Vec<Peer>,
     /// The queue from which peer are retrieved for the application layer
@@ -75,9 +30,9 @@ impl View {
     /// # Arguments
     ///
     /// * `address` - Addres of peer
-    fn new(address: String) -> View {
+    fn new(host_address: String) -> View {
         View {
-            address,
+            host_address,
             peers: vec![],
             queue: VecDeque::new(),
         }
@@ -157,7 +112,7 @@ impl View {
     /// * `s` - The swap parameter
     /// * `buffer` - The view received
     fn select(&mut self, c:usize, h: usize, s: usize, buffer: &Vec<Peer>, monitoring_config: MonitoringConfig) {
-        let my_address = self.address.clone();
+        let my_address = self.host_address.clone();
         // Add received peers to current view, omitting the node's own address
         buffer.iter()
             .filter(|peer| peer.address != my_address)
@@ -173,7 +128,7 @@ impl View {
             .collect::<Vec<String>>();
         log::debug!("{}", new_view.join(", "));
         if monitoring_config.enabled() {
-            monitoring_config.send_data(&self.address, new_view);
+            monitoring_config.send_data(&self.host_address, new_view);
         }
     }
 
@@ -367,7 +322,7 @@ impl PeerSamplingService {
     /// * `config` - The parameters for the peer sampling protocol
     pub fn new(config: Config) -> PeerSamplingService {
         PeerSamplingService {
-            view: Arc::new(Mutex::new(View::new(config.bind_address.clone()))),
+            view: Arc::new(Mutex::new(View::new(config.address().to_string()))),
             config,
         }
     }
@@ -385,7 +340,7 @@ impl PeerSamplingService {
 
         // listen to incoming message
         let (tx, rx) = std::sync::mpsc::channel();
-        let listener_handler = crate::network::start_listener(&self.config.bind_address, tx);
+        let listener_handler = crate::network::start_listener(&self.config.address(), tx);
         let receiver_handler = self.start_receiver(rx);
 
         // start peer sampling
@@ -410,10 +365,10 @@ impl PeerSamplingService {
     /// * `config` - The configuration parameters
     /// * `view` - The current view
     fn build_buffer(config: &Config, view: &mut View) -> Vec<Peer> {
-        let mut buffer = vec![ Peer::new(config.bind_address.clone()) ];
+        let mut buffer = vec![ Peer::new(config.address().to_string()) ];
         view.permute();
-        view.move_oldest_to_end(config.healing_factor);
-        buffer.append(&mut view.head(config.view_size));
+        view.move_oldest_to_end(config.healing_factor());
+        buffer.append(&mut view.head(config.view_size()));
         buffer
     }
 
@@ -425,23 +380,28 @@ impl PeerSamplingService {
     fn start_receiver(&self, receiver: Receiver<Message>) -> JoinHandle<()> {
         let config = self.config.clone();
         let view_arc = self.view.clone();
-        std::thread::Builder::new().name(format!("{} - msg rx", config.bind_address)).spawn(move|| {
+        std::thread::Builder::new().name(format!("{} - msg rx", config.address())).spawn(move|| {
             while let Ok(message) = receiver.recv() {
                 log::debug!("Received: {:?}", message);
                 let mut view = view_arc.lock().unwrap();
                 if let MessageType::Request = message.message_type() {
-                    if config.pull {
+                    if config.is_pull() {
                         let buffer = Self::build_buffer(&config, &mut view);
-                        log::debug!("built response buffer: {:?}", buffer);
-                        match crate::network::send(&message.sender(), Message::new_response(config.bind_address.clone(), Some(buffer))) {
-                            Ok(()) => log::debug!("Buffer sent successfully"),
-                            Err(e) => log::error!("Error sending buffer: {}", e),
+                        log::debug!("Built response buffer: {:?}", buffer);
+                        if let Ok(remote_address) = message.sender().parse::<SocketAddr>() {
+                            match crate::network::send(&remote_address, Message::new_response(config.address().to_string(), Some(buffer))) {
+                                Ok(()) => log::debug!("Buffer sent successfully"),
+                                Err(e) => log::error!("Error sending buffer: {}", e),
+                            }
+                        }
+                        else {
+                            log::error!("Could not parse sender address {}", &message.sender());
                         }
                     }
                 }
 
                 if let Some(buffer) = message.view() {
-                    view.select(config.view_size, config.healing_factor, config.swapping_factor, &buffer, config.monitoring.clone());
+                    view.select(config.view_size(), config.healing_factor(), config.swapping_factor(), &buffer, config.monitoring().clone());
                 }
                 else {
                     log::warn!("received a response with an empty buffer");
@@ -456,29 +416,41 @@ impl PeerSamplingService {
     fn start_sampling_activity(&self) -> JoinHandle<()> {
         let config = self.config.clone();
         let view_arc = self.view.clone();
-        std::thread::Builder::new().name(format!("{} - sampling", config.bind_address)).spawn(move || {
+        std::thread::Builder::new().name(format!("{} - sampling", config.address())).spawn(move || {
             loop {
+                // Compute time for sleep cycle
                 let deviation =
-                    if config.sampling_deviation == 0 { 0 }
-                    else { rand::thread_rng().gen_range(0, config.sampling_deviation * 1000) };
-                let sleep_time = config.sampling_period * 1000 + deviation;
+                    if config.sampling_deviation() == 0 { 0 }
+                    else { rand::thread_rng().gen_range(0, config.sampling_deviation() * 1000) };
+                let sleep_time = config.sampling_period() * 1000 + deviation;
                 std::thread::sleep(Duration::from_millis(sleep_time));
-                log::debug!("Starting sampling protocol");
+
+                log::debug!("Sampling peers");
                 let mut view = view_arc.lock().unwrap();
                 if let Some(peer) = view.select_peer() {
-                    if config.push {
+                    if config.is_push() {
                         let buffer = Self::build_buffer(&config, &mut view);
                         // send local view
-                        match crate::network::send(&peer.address, Message::new_request(config.bind_address.clone(), Some(buffer))) {
-                            Ok(()) => log::debug!("Buffer sent successfully"),
-                            Err(e) => log::error!("Error sending buffer: {}", e),
+                        if let Ok(remote_address) = &peer.address.parse::<SocketAddr>() {
+                            match crate::network::send(remote_address, Message::new_request(config.address().to_string(), Some(buffer))) {
+                                Ok(()) => log::debug!("Buffer sent successfully"),
+                                Err(e) => log::error!("Error sending buffer: {}", e),
+                            }
+                        }
+                        else {
+                            log::error!("Could not parse sender address {}", &peer.address);
                         }
                     }
                     else {
                         // send empty view to trigger response
-                        match crate::network::send(&peer.address, Message::new_request(config.bind_address.clone(), None)) {
-                            Ok(()) => log::debug!("Empty view sent successfully"),
-                            Err(e) => log::error!("Error sending empty view: {}", e),
+                        if let Ok(remote_address) = &peer.address.parse::<SocketAddr>() {
+                            match crate::network::send(remote_address, Message::new_request(config.address().to_string(), None)) {
+                                Ok(()) => log::debug!("Empty view sent successfully"),
+                                Err(e) => log::error!("Error sending empty view: {}", e),
+                            }
+                        }
+                        else {
+                            log::error!("Could not parse sender address {}", &peer.address);
                         }
                     }
                     view.increase_age();
