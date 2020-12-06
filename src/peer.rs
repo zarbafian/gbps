@@ -11,6 +11,7 @@ use rand::seq::SliceRandom;
 
 use crate::message::{Message, MessageType};
 use std::hash::{Hash, Hasher};
+use crate::monitor::MonitoringConfig;
 
 /// The peer sampling parameters
 ///
@@ -34,11 +35,17 @@ pub struct Config {
     healing_factor: usize,
     /// The number of peer swapped at each cycle
     swapping_factor: usize,
+    /// Monitoring configuration
+    monitoring: MonitoringConfig,
 }
 
 impl Config {
     /// Returns a configuration with specified parameters
-    pub fn new(bind_address: String, push: bool, pull: bool, sampling_period: u64, sampling_deviation: u64, view_size: usize, healing_factor: usize, swapping_factor: usize) -> Config {
+    pub fn new(bind_address: String, push: bool, pull: bool, sampling_period: u64, sampling_deviation: u64, view_size: usize, healing_factor: usize, swapping_factor: usize, monitoring_config: Option<MonitoringConfig>) -> Config {
+        let monitoring = match monitoring_config {
+            Some(config) => config,
+            None => MonitoringConfig::default(),
+        };
         Config {
             bind_address,
             push,
@@ -48,6 +55,7 @@ impl Config {
             view_size,
             healing_factor,
             swapping_factor,
+            monitoring
         }
     }
 }

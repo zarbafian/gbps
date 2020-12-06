@@ -13,6 +13,7 @@ mod tests {
     use crate::{Peer, Config, PeerSamplingService};
     use std::collections::HashMap;
     use std::error::Error;
+    use crate::monitor::MonitoringConfig;
 
     #[test]
     fn initial_peer() {
@@ -43,11 +44,13 @@ mod tests {
         let h = 1;
         let s = 3;
 
+        let monitor = Some(MonitoringConfig::new(true, "127.0.0.1:8080/peers"));
+
         let mut result: Vec<(Config, Box<dyn FnOnce() -> Option<Peer>>)>  = vec![];
         let mut port = 9000;
         let init_port = 9000;
         result.push(
-            (Config::new(format!("127.0.0.1:{}", port), push, pull, t, d, c, h, s),
+            (Config::new(format!("127.0.0.1:{}", port), push, pull, t, d, c, h, s, monitor.clone()),
              Box::new(|| { None }))
         );
         port += 1;
@@ -55,7 +58,7 @@ mod tests {
         for icon in 1..80 {
             let address = format!("127.0.0.1:{}", port);
             port += 1;
-            result.push((Config::new(address, push, pull, t, d, c, h, s),
+            result.push((Config::new(address, push, pull, t, d, c, h, s, monitor.clone()),
                          Box::new(move|| { Some(Peer::new(format!("127.0.0.1:{}", init_port))) })));
         }
         result

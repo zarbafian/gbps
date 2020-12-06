@@ -2,6 +2,43 @@ pub const MONITORING_ENABLED: bool = true;
 pub const MONITORING_HOST: &str = "127.0.0.1:8080";
 pub const MONITORING_CONTEXT: &str = "/peers";
 
+#[derive(Clone)]
+pub struct MonitoringConfig {
+    enabled: bool,
+    host: String,
+    context: String,
+}
+
+impl MonitoringConfig {
+    pub fn new(enabled: bool, url: &str) -> MonitoringConfig {
+        // remove leading protocol
+        let protocol_removed = match url.find("://") {
+            Some(index) => &url[index+3..],
+            None => url
+        };
+        // separate host and context
+        let (host, context) = match protocol_removed.find("/") {
+            Some(index) => (&url[..index], &url[index..]),
+            None => (url, "/")
+        };
+        MonitoringConfig {
+            enabled,
+            host: host.to_owned(),
+            context: context.to_owned()
+        }
+    }
+}
+
+impl Default for MonitoringConfig {
+    fn default() -> Self {
+        MonitoringConfig {
+            enabled: false,
+            host: "".to_string(),
+            context: "".to_string()
+        }
+    }
+}
+
 pub fn send_data(pid: &str, peers: Vec<String>) {
 
     let pid = pid.to_owned();
@@ -16,8 +53,12 @@ pub fn send_data(pid: &str, peers: Vec<String>) {
                 \"messages\":[{}]\
             }}", pid, peers_str, "");
         //println!("send_data:\n{}", json);
-        post(json);
-        log::debug!("Peer {}: monitoring data sent", pid);
+        if let Ok(()) = post(json) {
+            log::debug!("Peer {}: monitoring data sent", pid);
+        }
+        else {
+            log::warn!("Peer {}: could not send monitoring data", pid);
+        }
     });
 }
 
