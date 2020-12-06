@@ -12,7 +12,7 @@ pub use crate::peer::PeerSamplingService;
 mod tests {
     use std::thread::JoinHandle;
     use crate::{Peer, Config, PeerSamplingService};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, VecDeque};
     use std::error::Error;
     use crate::monitor::MonitoringConfig;
 
@@ -27,11 +27,11 @@ mod tests {
             handles.push(handle);
         };
 
-        let first = handles.remove(0);
+        let first = handles[0].remove(0);
         first.join().unwrap();
     }
 
-    fn start_node(config: Config, init_handler: Box<dyn FnOnce() -> Option<Peer>>) -> JoinHandle<()> {
+    fn start_node(config: Config, init_handler: Box<dyn FnOnce() -> Option<Peer>>) -> Vec<JoinHandle<()>> {
         let mut service = PeerSamplingService::new(config);
         service.init(init_handler)
     }

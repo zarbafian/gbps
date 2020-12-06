@@ -117,10 +117,13 @@ impl View {
         buffer.iter()
             .filter(|peer| peer.address != my_address)
             .for_each(|peer| self.peers.push(peer.clone()));
+        // Perform peer selection algorithm
         self.remove_duplicates();
         self.remove_old_items(c, h);
         self.remove_head(c, s);
         self.remove_at_random(c);
+        // Update peer queue for application layer
+        self.update_queue();
 
         // Debug and monitoring
         let new_view = self.peers.iter()
@@ -200,6 +203,31 @@ impl View {
         }
     }
 
+    /// Update peer queue by adding peers that appeared in the view
+    /// and removing those that were removed.
+    fn update_queue(&mut self) {
+
+        // compute index of removed peers
+        let removed_peers = self.queue.iter().enumerate()
+            .filter(|(_, peer)| !self.peers.contains(peer))
+            .map(|(index, _)| index)
+            .collect::<Vec<usize>>();
+
+        // compute new peers
+        let added_peers = self.peers.iter()
+            .filter(|peer| !self.queue.contains(peer))
+            .map(|peer| peer.to_owned())
+            .collect::<Vec<Peer>>();
+
+        // removed old peers by descending index
+        removed_peers.iter().rev().for_each(|index| { self.queue.remove(*index); });
+
+        // add peers that were not removed
+        for peer in added_peers {
+            self.queue.push_back(peer);
+        }
+    }
+
     /// Returns a random peer for use in the application layer
     /// The peer is selected from the queue of fresh peer if  available
     pub fn get_peer(&mut self) -> Option<Peer> {
@@ -218,7 +246,7 @@ const SEPARATOR: u8 = 0x2C; // b','
 /// Information about a peer
 #[derive(Clone, Debug)]
 pub struct Peer {
-    /// Network address of the peer
+    /// Socket address of the peer
     address: String,
     /// Age of the peer
     age: u16,
@@ -251,7 +279,7 @@ impl Peer {
 
     /// Serializes peer into an array of bytes.
     /// Starts with the address of the peer first followed by the age of the peer
-    /// Address and age are separated by a [SEPARATOR] byte.
+    /// address and age are separated by a [SEPARATOR] byte.
     pub fn as_bytes(&self) -> Vec<u8> {
         // peer address
         let mut v = self.address.as_bytes().to_vec();
@@ -332,7 +360,7 @@ impl PeerSamplingService {
     /// # Arguments
     ///
     /// * `initial_peer` - A closure returning the initial peer for starting the protocol
-    pub fn init(&mut self, initial_peer: Box<dyn FnOnce() -> Option<Peer>>) -> JoinHandle<()> {
+    pub fn init(&mut self, initial_peer: Box<dyn FnOnce() -> Option<Peer>>) -> Vec<JoinHandle<()>> {
         // get address of initial peer
         if let Some(initial_peer) = initial_peer() {
             self.view.lock().unwrap().peers.push(initial_peer);
@@ -346,14 +374,12 @@ impl PeerSamplingService {
         // start peer sampling
         let sampling_handler = self.start_sampling_activity();
 
-        // join threads
-        listener_handler
-        //sampling_handler.join().unwrap();
+        vec![listener_handler, receiver_handler, sampling_handler]
     }
 
-    /// Returns a random peer for the client application
-    /// The peer is pseudo-random peer from the set of all peers
-    /// The local view is built using [Gossip-Based Peer Sampling]
+    /// Returns a random peer for the client application.
+    /// The peer is pseudo-random peer from the set of all peers.
+    /// The local view is built using [Gossip-Based Peer Sampling].
     pub fn get_peer(&mut self) -> Option<&Peer> {
         unimplemented!()
     }

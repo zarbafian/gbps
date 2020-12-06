@@ -75,7 +75,7 @@ impl Message {
             // view size in number of peers
             buffer.push(peers.len() as u8);
             // rest of bytes: peers
-            peers.iter().map(|p| {p.as_bytes()}).for_each(|mut bytes| {
+            peers.iter().map(|p| { p.as_bytes() }).for_each(|mut bytes| {
                 // length of peer data in bytes
                 buffer.push(bytes.len() as u8);
                 // peer data
