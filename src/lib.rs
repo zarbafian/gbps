@@ -10,11 +10,7 @@ pub use crate::peer::PeerSamplingService;
 
 #[cfg(test)]
 mod tests {
-    use std::thread::JoinHandle;
     use crate::{Peer, Config, PeerSamplingService};
-    use std::collections::{HashMap, VecDeque};
-    use std::error::Error;
-    use crate::monitor::MonitoringConfig;
 
     #[test]
     fn start_nodes() {
@@ -27,15 +23,10 @@ mod tests {
         let h = 1;
         let s = 2;
 
-        let monitor = Some(MonitoringConfig::new(true, "127.0.0.1:8080/peers"));
-        configure_logging("tmp/test.log".to_owned(), "INFO".to_owned());
-
-        let mut result: Vec<(Config, Box<dyn FnOnce() -> Option<Peer>>)>  = vec![];
-
         // create first peer with no contact peer
         let init_address = "127.0.0.1:9000";
         // configuration
-        let first_config = Config::new(init_address.parse().unwrap(), push, pull, t, d, c, h, s, monitor.clone());
+        let first_config = Config::new(init_address.parse().unwrap(), push, pull, t, d, c, h, s, None);
         // no contact peer for first node
         let no_peer_handler = Box::new(move|| { None });
 
@@ -48,7 +39,7 @@ mod tests {
             // peer socket address
             let address = format!("127.0.0.1:{}", port);
             // configuration
-            let config = Config::new(address.parse().unwrap(), push, pull, t, d, c, h, s, monitor.clone());
+            let config = Config::new(address.parse().unwrap(), push, pull, t, d, c, h, s, None);
             // closure for retrieving the address of the first contact peer
             let init_handler = Box::new(move|| { Some(Peer::new(init_address.to_owned())) });
 
@@ -62,7 +53,7 @@ mod tests {
             // peer socket address
             let address = format!("[::1]:{}", port);
             // configuration
-            let config = Config::new(address.parse().unwrap(), push, pull, t, d, c, h, s, monitor.clone());
+            let config = Config::new(address.parse().unwrap(), push, pull, t, d, c, h, s, None);
             // closure for retrieving the address of the first contact peer
             let init_handler = Box::new(move|| { Some(Peer::new(init_address.to_owned())) });
 
@@ -71,52 +62,6 @@ mod tests {
             port += 1;
         }
 
-        join_handles.remove(0).join();
-    }
-
-    fn configure_logging(file: String, level: String) -> Result<(), Box<dyn Error>>{
-
-        use log::{LevelFilter};
-        use log4rs::append::file::FileAppender;
-        use log4rs::encode::pattern::PatternEncoder;
-        use log4rs::config::{Appender, Config, Root};
-        use log4rs::append::console::ConsoleAppender;
-
-        let mut log_levels: HashMap<String, LevelFilter> = HashMap::new();
-        log_levels.insert(String::from("OFF"), LevelFilter::Off);
-        log_levels.insert(String::from("ERROR"), LevelFilter::Error);
-        log_levels.insert(String::from("WARN"), LevelFilter::Warn);
-        log_levels.insert(String::from("INFO"), LevelFilter::Info);
-        log_levels.insert(String::from("DEBUG"), LevelFilter::Debug);
-        log_levels.insert(String::from("TRACE"), LevelFilter::Trace);
-
-        let mut level_filter = &LevelFilter::Info;
-
-        if let Some(filter) = log_levels.get(&level.to_uppercase()) {
-            level_filter = filter;
-        }
-        else {
-            Err(format!("Invalid logging level: {}", level))?
-        }
-
-        let logfile = FileAppender::builder()
-            .encoder(Box::new(PatternEncoder::new("{d} [{l}] {T} - {m}{n}")))
-            .build(file)?;
-
-        let console = ConsoleAppender::builder()
-            .encoder(Box::new(PatternEncoder::new("[{l}] {T} - {m}{n}")))
-            .build();
-
-        let config = Config::builder()
-            .appender(Appender::builder().build("console", Box::new(console)))
-            .appender(Appender::builder().build("logfile", Box::new(logfile)))
-            .build(Root::builder()
-                .appender("console")
-                .appender("logfile")
-                .build(*level_filter))?;
-
-        log4rs::init_config(config)?;
-
-        Ok(())
+        join_handles.remove(0).join().unwrap();
     }
 }

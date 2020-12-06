@@ -14,5 +14,4 @@ readme = "README.md"
 
 [dependencies]
 log = "0.4.11"
-log4rs = "1.0.0-alpha-2"
 rand = "0.7.3"
