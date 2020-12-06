@@ -1,6 +1,6 @@
 use crate::peer::Peer;
 use std::error::Error;
-use std::fmt::{Formatter, Debug};
+use std::fmt::Debug;
 
 const MSG_TYPE_REQ: u8 = 0x80; // 0b1000000
 const MSG_TYPE_RESP: u8 = 0x00;

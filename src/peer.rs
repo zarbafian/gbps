@@ -26,6 +26,8 @@ pub struct Config {
     pull: bool,
     /// The interval between each cycle of push/pull
     sampling_period: u64,
+    /// Maximum value of random deviation from sampling interval
+    sampling_deviation: u64,
     /// The number of peers in the node's view
     view_size: usize,
     /// The number of removal at each cycle
@@ -36,15 +38,16 @@ pub struct Config {
 
 impl Config {
     /// Returns a configuration with specified parameters
-    pub fn new(bind_address: String, push: bool, pull: bool, sampling_period: u64, view_size: usize, healing_factor: usize, swapping_factor: usize) -> Config {
+    pub fn new(bind_address: String, push: bool, pull: bool, sampling_period: u64, sampling_deviation: u64, view_size: usize, healing_factor: usize, swapping_factor: usize) -> Config {
         Config {
             bind_address,
             push,
             pull,
             sampling_period,
+            sampling_deviation,
             view_size,
             healing_factor,
-            swapping_factor
+            swapping_factor,
         }
     }
 }
@@ -156,10 +159,12 @@ impl View {
         self.remove_head(c, s);
         self.remove_at_random(c);
 
+        // Debug and monitoring
         let new_view = self.peers.iter()
-            .map(|peer| &peer.address[peer.address.len()-4..])
-            .collect::<Vec<&str>>().join(", ");
-        log::info!("{}", new_view);
+            .map(|peer| peer.address.to_owned())
+            .collect::<Vec<String>>();
+        log::debug!("{}", new_view.join(", "));
+        crate::monitor::send_data(&self.address, new_view);
     }
 
     /// Removes duplicates peers from the view by keeping the most recent one
@@ -443,7 +448,11 @@ impl PeerSamplingService {
         let view_arc = self.view.clone();
         std::thread::Builder::new().name(format!("{} - sampling", config.bind_address)).spawn(move || {
             loop {
-                std::thread::sleep(Duration::from_secs(config.sampling_period));
+                let deviation =
+                    if config.sampling_deviation == 0 { 0 }
+                    else { rand::thread_rng().gen_range(0, config.sampling_deviation * 1000) };
+                let sleep_time = config.sampling_period * 1000 + deviation;
+                std::thread::sleep(Duration::from_millis(sleep_time));
                 log::debug!("Starting sampling protocol");
                 let mut view = view_arc.lock().unwrap();
                 if let Some(peer) = view.select_peer() {

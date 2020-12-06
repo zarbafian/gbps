@@ -1,3 +1,4 @@
+mod monitor;
 mod message;
 mod network;
 mod peer;
@@ -36,24 +37,25 @@ mod tests {
     fn get_nodes() -> Vec<(Config, Box<dyn FnOnce() -> Option<Peer>>)> {
         let push = true;
         let pull = true;
-        let t = 5;
-        let c = 6;
+        let t = 10;
+        let d = 10;
+        let c = 8;
         let h = 1;
-        let s = 2;
+        let s = 3;
 
         let mut result: Vec<(Config, Box<dyn FnOnce() -> Option<Peer>>)>  = vec![];
         let mut port = 9000;
         let init_port = 9000;
         result.push(
-            (Config::new(format!("127.0.0.1:{}", port), push, pull, t, c, h, s),
+            (Config::new(format!("127.0.0.1:{}", port), push, pull, t, d, c, h, s),
              Box::new(|| { None }))
         );
         port += 1;
 
-        for icon in 1..33 {
+        for icon in 1..80 {
             let address = format!("127.0.0.1:{}", port);
             port += 1;
-            result.push((Config::new(address, push, pull, t, c, h, s),
+            result.push((Config::new(address, push, pull, t, d, c, h, s),
                          Box::new(move|| { Some(Peer::new(format!("127.0.0.1:{}", init_port))) })));
         }
         result
