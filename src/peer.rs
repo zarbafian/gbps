@@ -156,7 +156,7 @@ impl View {
     /// * `h` - The healing parameter
     /// * `s` - The swap parameter
     /// * `buffer` - The view received
-    fn select(&mut self, c:usize, h: usize, s: usize, buffer: &Vec<Peer>) {
+    fn select(&mut self, c:usize, h: usize, s: usize, buffer: &Vec<Peer>, monitoring_config: MonitoringConfig) {
         let my_address = self.address.clone();
         // Add received peers to current view, omitting the node's own address
         buffer.iter()
@@ -172,7 +172,9 @@ impl View {
             .map(|peer| peer.address.to_owned())
             .collect::<Vec<String>>();
         log::debug!("{}", new_view.join(", "));
-        crate::monitor::send_data(&self.address, new_view);
+        if monitoring_config.enabled() {
+            monitoring_config.send_data(&self.address, new_view);
+        }
     }
 
     /// Removes duplicates peers from the view by keeping the most recent one
@@ -439,7 +441,7 @@ impl PeerSamplingService {
                 }
 
                 if let Some(buffer) = message.view() {
-                    view.select(config.view_size, config.healing_factor, config.swapping_factor, &buffer);
+                    view.select(config.view_size, config.healing_factor, config.swapping_factor, &buffer, config.monitoring.clone());
                 }
                 else {
                     log::warn!("received a response with an empty buffer");
