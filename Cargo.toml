@@ -9,7 +9,10 @@ repository = "https://github.com/pouriya-zarbafian/gbps.git"
 keywords = ["distributed-systems", "gossip-protocol", "peer-sampling", "random-graph", "overlay-network"]
 categories = ["algorithms"]
 readme = "README.md"
-
+exclude = [
+    "assets/*",
+    "v.gitignore",
+]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
