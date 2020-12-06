@@ -12,7 +12,7 @@ The crate provides the two methods described in the article:
 The configuration parameters are the same as those presented in the paper:
  - `push`: push data
  - `pull`: pull data
- - `T`: period of each cycle
+ - `T`: duration of each cycle
  - `c`: size of local view
  - `H`: healing factor
  - `S`: swapping factor
