@@ -1,8 +1,14 @@
 [package]
 name = "gbps"
+description = "Rust implementation of gossip-based peer sampling"
 version = "0.1.0"
-authors = ["pouriya-zarbafian <pouriya.zarbafian@example.com>"]
+authors = ["Pouriya Zarbafian"]
 edition = "2018"
+license = "MIT"
+repository = "https://github.com/pouriya-zarbafian/gbps.git"
+keywords = ["distributed-systems", "gossip-protocol", "peer-sampling", "random-graph", "overlay-network"]
+categories = ["algorithms"]
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

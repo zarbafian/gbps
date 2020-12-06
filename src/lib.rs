@@ -17,26 +17,8 @@ mod tests {
     use crate::monitor::MonitoringConfig;
 
     #[test]
-    fn initial_peer() {
-        configure_logging("tmp/test.log".to_string(), "INFO".to_string()).unwrap();
-
-        let mut handles = Vec::new();
-
-        for (config, handler) in get_nodes() {
-            let handle = start_node(config, handler);
-            handles.push(handle);
-        };
-
-        let first = handles[0].remove(0);
-        first.join().unwrap();
-    }
-
-    fn start_node(config: Config, init_handler: Box<dyn FnOnce() -> Option<Peer>>) -> Vec<JoinHandle<()>> {
-        let mut service = PeerSamplingService::new(config);
-        service.init(init_handler)
-    }
-
-    fn get_nodes() -> Vec<(Config, Box<dyn FnOnce() -> Option<Peer>>)> {
+    fn start_nodes() {
+        // algorithm parameters
         let push = true;
         let pull = true;
         let t = 5;
@@ -46,29 +28,50 @@ mod tests {
         let s = 2;
 
         let monitor = Some(MonitoringConfig::new(true, "127.0.0.1:8080/peers"));
+        configure_logging("tmp/test.log".to_owned(), "INFO".to_owned());
 
         let mut result: Vec<(Config, Box<dyn FnOnce() -> Option<Peer>>)>  = vec![];
-        let mut port = 9000;
-        let init_port = 9000;
-        result.push(
-            (Config::new(format!("127.0.0.1:{}", port).parse().unwrap(), push, pull, t, d, c, h, s, monitor.clone()),
-             Box::new(|| { None }))
-        );
-        port += 1;
 
-        for icon in 1..10 {
-            let address = format!("127.0.0.1:{}", port).parse().unwrap();
+        // create first peer with no contact peer
+        let init_address = "127.0.0.1:9000";
+        // configuration
+        let first_config = Config::new(init_address.parse().unwrap(), push, pull, t, d, c, h, s, monitor.clone());
+        // no contact peer for first node
+        let no_peer_handler = Box::new(move|| { None });
+
+        // create and initiate the peer sampling service
+        let mut join_handles = PeerSamplingService::new(first_config).init(no_peer_handler);
+
+        // create peers using IPv4 addresses
+        let mut port = 9001;
+        for _ in 1..30 {
+            // peer socket address
+            let address = format!("127.0.0.1:{}", port);
+            // configuration
+            let config = Config::new(address.parse().unwrap(), push, pull, t, d, c, h, s, monitor.clone());
+            // closure for retrieving the address of the first contact peer
+            let init_handler = Box::new(move|| { Some(Peer::new(init_address.to_owned())) });
+
+            // create and initiate the peer sampling service
+            let _handles = PeerSamplingService::new(config).init(init_handler);
             port += 1;
-            result.push((Config::new(address, push, pull, t, d, c, h, s, monitor.clone()),
-                         Box::new(move|| { Some(Peer::new(format!("127.0.0.1:{}", init_port))) })));
         }
-        for icon in 1..10 {
-            let address = format!("[::1]:{}", port).parse().unwrap();
+
+        // create peers using IPv6 addresses
+        for _ in 1..30 {
+            // peer socket address
+            let address = format!("[::1]:{}", port);
+            // configuration
+            let config = Config::new(address.parse().unwrap(), push, pull, t, d, c, h, s, monitor.clone());
+            // closure for retrieving the address of the first contact peer
+            let init_handler = Box::new(move|| { Some(Peer::new(init_address.to_owned())) });
+
+            // create and initiate the peer sampling service
+            let _handles = PeerSamplingService::new(config).init(init_handler);
             port += 1;
-            result.push((Config::new(address, push, pull, t, d, c, h, s, monitor.clone()),
-                         Box::new(move|| { Some(Peer::new(format!("127.0.0.1:{}", init_port))) })));
         }
-        result
+
+        join_handles.remove(0).join();
     }
 
     fn configure_logging(file: String, level: String) -> Result<(), Box<dyn Error>>{
