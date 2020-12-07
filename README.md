@@ -6,7 +6,7 @@ This crate is a Rust implementation of the algorithm proposed by Jelasity et al 
 # API
 The crate provides the two methods described in the article:
  - `init`: initializes the peer sampling protocol
- - `get_peer`: return a peer at random for a gossip protocol 
+ - `get_peer`: returns a peer at random for a gossip protocol 
 
 # Configuration
 The configuration parameters are the same as those presented in the paper:

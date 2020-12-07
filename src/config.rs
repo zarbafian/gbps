@@ -15,7 +15,8 @@ pub struct Config {
     pull: bool,
     /// The interval between each cycle of push/pull
     sampling_period: u64,
-    /// Maximum value of random deviation from sampling interval
+    /// Maximum value of random deviation added to the sampling interval.
+    /// Intended for local testing.
     sampling_deviation: u64,
     /// The number of peers in the node's view
     view_size: usize,

@@ -21,13 +21,14 @@ impl MonitoringConfig {
     /// * `url` - URL of monitoring host
     pub fn new(enabled: bool, url: &str) -> MonitoringConfig {
         // remove leading protocol
-        let protocol_removed = match url.find("://") {
-            Some(index) => &url[index + 3..],
-            None => url
+        let protocol_removed = if url.starts_with("http://") {
+            &url[7..] }
+        else {
+            url
         };
         // separate host and context
         let (host, context) = match protocol_removed.find("/") {
-            Some(index) => (&url[..index], &url[index..]),
+            Some(index) => (&protocol_removed[..index], &protocol_removed[index..]),
             None => (url, "/")
         };
         MonitoringConfig {
@@ -62,24 +63,23 @@ impl MonitoringConfig {
                 \"messages\":[{}]\
             }}", pid, peers_str, "");
             //println!("send_data:\n{}", json);
-            if let Ok(()) = MonitoringConfig::post(host, context, json) {
-                log::debug!("Peer {}: monitoring data sent", pid);
-            } else {
-                log::warn!("Peer {}: could not send monitoring data", pid);
+            match MonitoringConfig::post(&host, &context, json) {
+                Ok(()) => log::debug!("Peer {}: monitoring data sent", pid),
+                Err(e) => log::warn!("Peer {} could not send monitoring data to {}: {}", pid, host, e),
             }
         });
     }
 
-    fn post(host: String, context: String, json: String) -> std::io::Result<()> {
+    fn post(host: &str, context: &str, json: String) -> std::io::Result<()> {
 
         let bytes = json.as_bytes();
 
-        let mut stream = std::net::TcpStream::connect(&host)?;
+        let mut stream = std::net::TcpStream::connect(host)?;
 
         let mut request_data = String::new();
-        request_data.push_str(&format!("POST {} HTTP/1.1", &context));
+        request_data.push_str(&format!("POST {} HTTP/1.1", context));
         request_data.push_str("\r\n");
-        request_data.push_str(&format!("Host: {}", &host));
+        request_data.push_str(&format!("Host: {}", host));
         request_data.push_str("\r\n");
         request_data.push_str("Accept: */*");
         request_data.push_str("\r\n");
@@ -100,7 +100,7 @@ impl MonitoringConfig {
         let mut buf = String::new();
         let _result = stream.read_to_string(&mut buf)?;
         //println!("result = {}", result);
-        //println!("buf = {}", buf);
+        log::debug!("buf = {}", buf);
 
         Ok(())
     }
