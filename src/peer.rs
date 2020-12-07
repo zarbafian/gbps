@@ -19,7 +19,7 @@ use std::net::SocketAddr;
 struct View {
     /// The address of the node
     host_address: String,
-    /// The list of peers the node is aware of
+    /// The list of peers in the node view
     peers: Vec<Peer>,
     /// The queue from which peer are retrieved for the application layer
     queue: VecDeque<Peer>,
@@ -55,30 +55,30 @@ impl View {
     }
 
     /// Move the oldest peers to the end of the view if the size
-    /// of the view is larger than the argument
+    /// of the view is larger than the healing factor
     ///
     /// # Arguments
     ///
     /// * `h` - The number of peer that should be moved
     fn move_oldest_to_end(&mut self, h: usize) {
         if self.peers.len() > h {
-            let mut sorted_by_age = self.peers.clone();
-            sorted_by_age.sort_by_key(|peer| peer.age);
-            sorted_by_age.reverse();
-            sorted_by_age.truncate(h);
-            // (peers.len - h) at th beginning, h at the end
-            let mut view_start = vec![];
-            let mut view_end = vec![];
+            let mut h_oldest_peers = self.peers.clone();
+            h_oldest_peers.sort_by_key(|peer| peer.age);
+            h_oldest_peers.reverse();
+            h_oldest_peers.truncate(h); //
+            // (peers.len - h) at the beginning, h at the end
+            let mut new_view_start = vec![];
+            let mut new_view_end = vec![];
             for peer in &self.peers {
-                if sorted_by_age.contains(&peer) {
-                    view_end.push(peer.clone());
+                if h_oldest_peers.contains(&peer) {
+                    new_view_end.push(peer.clone());
                 }
                 else {
-                    view_start.push(peer.clone());
+                    new_view_start.push(peer.clone());
                 }
             }
-            view_start.append(&mut view_end);
-            self.peers = view_start;
+            new_view_start.append(&mut new_view_end);
+            std::mem::replace(&mut self.peers, new_view_start);
         }
     }
 
@@ -135,7 +135,7 @@ impl View {
         }
     }
 
-    /// Removes duplicates peers from the view by keeping the most recent one
+    /// Removes duplicates peers from the view and keep the most recent one
     fn remove_duplicates(&mut self) {
         let mut unique_peers: HashSet<Peer> = HashSet::new();
         self.peers.iter().for_each(|peer| {
@@ -164,12 +164,12 @@ impl View {
         let min = if self.peers.len() > c { self.peers.len() - c } else { 0 };
         let removal_count = std::cmp::min(h, min);
         if removal_count > 0 {
-            let mut sorted_by_age = self.peers.clone();
-            sorted_by_age.sort_by_key(|peer| peer.age);
-            sorted_by_age.truncate(sorted_by_age.len() - removal_count);
+            let mut kept_peers = self.peers.clone();
+            kept_peers.sort_by_key(|peer| peer.age);
+            kept_peers.truncate(kept_peers.len() - removal_count);
             let mut new_view = vec![];
             for peer in &self.peers {
-                if sorted_by_age.contains(&peer) {
+                if kept_peers.contains(&peer) {
                     new_view.push(peer.clone());
                 }
             }
@@ -222,14 +222,15 @@ impl View {
         // removed old peers by descending index
         removed_peers.iter().rev().for_each(|index| { self.queue.remove(*index); });
 
-        // add peers that were not removed
+        // add new peers
         for peer in added_peers {
             self.queue.push_back(peer);
         }
     }
 
-    /// Returns a random peer for use in the application layer
-    /// The peer is selected from the queue of fresh peer if  available
+    /// Returns a random peer for use in the application layer.
+    /// The peer is selected from the queue of newly added peers if available,
+    /// otherwise at random from the view.
     pub fn get_peer(&mut self) -> Option<Peer> {
         if let Some(peer) = self.queue.pop_front() {
             Some(peer)
@@ -406,7 +407,7 @@ impl PeerSamplingService {
     fn start_receiver(&self, receiver: Receiver<Message>) -> JoinHandle<()> {
         let config = self.config.clone();
         let view_arc = self.view.clone();
-        std::thread::Builder::new().name(format!("{} - msg rx", config.address())).spawn(move|| {
+        std::thread::Builder::new().name(format!("{} - message handler", config.address())).spawn(move|| {
             while let Ok(message) = receiver.recv() {
                 log::debug!("Received: {:?}", message);
                 let mut view = view_arc.lock().unwrap();
@@ -442,7 +443,7 @@ impl PeerSamplingService {
     fn start_sampling_activity(&self) -> JoinHandle<()> {
         let config = self.config.clone();
         let view_arc = self.view.clone();
-        std::thread::Builder::new().name(format!("{} - sampling", config.address())).spawn(move || {
+        std::thread::Builder::new().name(format!("{} - peer sampling", config.address())).spawn(move || {
             loop {
                 // Compute time for sleep cycle
                 let deviation =

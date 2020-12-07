@@ -10,6 +10,7 @@ keywords = ["distributed-systems", "gossip-protocol", "peer-sampling", "random-g
 categories = ["algorithms"]
 readme = "README.md"
 exclude = [
+    "tests/*",
     "assets/*",
     ".gitignore",
     "README.md"

@@ -15,11 +15,11 @@ use std::sync::mpsc::Sender;
 pub fn start_listener(bind_address: &SocketAddr, sender: Sender<Message>) -> JoinHandle<()> {
     let listener = TcpListener::bind(bind_address).expect(&format!("Could not listen to bind_address {}", bind_address));
     log::info!("Started listener on {}", bind_address);
-    std::thread::Builder::new().name(format!("{} - listener", bind_address)).spawn(move || {
+    std::thread::Builder::new().name(format!("{} - TCP listener", bind_address)).spawn(move || {
         for incoming_stream in listener.incoming() {
             match incoming_stream {
                 Ok(mut stream) => {
-                    if let Err(e) =  handle_message(&mut stream, &sender) {
+                    if let Err(e) = handle_message(&mut stream, &sender) {
                         log::error!("Error processing request: {}", e);
                     }
                 }

@@ -84,7 +84,7 @@ mod tests {
             port += 1;
         }
 
-        std::thread::sleep(std::time::Duration::from_secs(11));
+        std::thread::sleep(std::time::Duration::from_secs(50));
 
         assert!(service.get_peer().is_some());
     }
