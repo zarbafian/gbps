@@ -95,29 +95,46 @@ impl Message {
     ///
     /// * `bytes` - A message serialized as bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Message, Box<dyn Error>> {
+
+        // message type(1) + sender size(1) + one byte for sender(>=1) + view size(1)
+        if bytes.len() < 4 {
+            Err("invalid message")?
+        }
+
         // message type
         let message_type = match bytes[0] & MASK_MSG_TYPE {
             MSG_TYPE_REQ => MessageType::Request,
             MSG_TYPE_RESP => MessageType::Response,
             _ => return Err("invalid message type")?,
         };
+
         // sender
         let sender_size = bytes[1] as usize;
+        // message type(1) + sender size(1) + sender(sender_size) + view size(>=1)
+        if bytes.len() < 3 + sender_size {
+            Err("invalid message")?
+        }
         let sender = String::from_utf8(bytes[2..2+sender_size].to_vec())?;
-        //log::debug!("parsed sender is {}", sender);
 
+        // view size
         let view_size = bytes[2+sender_size];
-        //log::debug!("parsed view_size is {}", view_size);
+        // message type(1) + sender size(1) + sender(sender_size) + view size(2 * view_size)
+        if bytes.len() < (2 + sender_size + 2 * view_size as usize) {
+            Err("invalid message")?
+        }
         if view_size > 0 {
             let mut index = 3+sender_size;
             let mut peers = vec![];
             for _ in 0..view_size {
                 let peer_length = bytes[index] as usize;
+                // index + 1 + peer length
+                if bytes.len() < index + 1 + peer_length{
+                    return Err("invalid message")?;
+                }
                 let parsed_peer = Peer::from_bytes(&bytes[index+1..index+1+peer_length])?;
                 peers.push(parsed_peer);
                 index += peer_length + 1;
             }
-            //log::debug!("parsed peers is {:?}", peers);
             Ok(Message {
                 sender,
                 message_type,
