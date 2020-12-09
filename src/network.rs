@@ -5,6 +5,8 @@ use std::thread::JoinHandle;
 
 use crate::message::Message;
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 /// Create a thread for listening to TCP connections
 ///
@@ -12,11 +14,27 @@ use std::sync::mpsc::Sender;
 ///
 /// * `bind_address` - The socket bind address
 /// * `sender` - A sender for notifying of received messages
-pub fn start_listener(bind_address: &SocketAddr, sender: Sender<Message>) -> JoinHandle<()> {
-    let listener = TcpListener::bind(bind_address).expect(&format!("Could not listen to bind_address {}", bind_address));
-    log::info!("Started listener on {}", bind_address);
+pub fn start_listener(bind_address: &SocketAddr, sender: Sender<Message>, shutdown_handle: &Arc<AtomicBool>) -> JoinHandle<()> {
+
+    let listener = TcpListener::bind(bind_address)
+        .expect(&format!("Could not listen to bind_address {}", bind_address));
+    log::info!("Listening on {}", bind_address);
+
+    // shutdown flag
+    let shutdown_requested = Arc::clone(shutdown_handle);
+
     std::thread::Builder::new().name(format!("{} - TCP listener", bind_address)).spawn(move || {
+        log::info!("Started listener thread");
+        // TOD: handle hanging connections wher peer connect but does not write
         for incoming_stream in listener.incoming() {
+
+            // check for shutdown request
+            if shutdown_requested.load(std::sync::atomic::Ordering::SeqCst) {
+                log::info!("Shutdown requested");
+                break;
+            }
+
+            // handle request
             match incoming_stream {
                 Ok(mut stream) => {
                     if let Err(e) = handle_message(&mut stream, &sender) {
@@ -26,10 +44,12 @@ pub fn start_listener(bind_address: &SocketAddr, sender: Sender<Message>) -> Joi
                 Err(e) => log::warn!("Connection failed: {}", e),
             }
         }
+        log::info!("Listener thread exiting");
     }).unwrap()
 }
 
 fn handle_message(stream: &mut TcpStream, sender: &Sender<Message>) -> Result<(), Box<dyn Error>>{
+    log::debug!("handle_message");
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf)?;
     let message = Message::from_bytes(&buf)?;

@@ -14,6 +14,7 @@ use std::hash::{Hash, Hasher};
 use crate::monitor::MonitoringConfig;
 use crate::config::Config;
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicBool;
 
 /// The view at each node
 struct View {
@@ -340,6 +341,12 @@ pub struct PeerSamplingService {
     config: Config,
     /// View containing a list of other peers
     view: Arc<Mutex<View>>,
+    // Handles for activity threads
+    thread_handles: Vec<JoinHandle<()>>,
+    /// Handle for shutting down the TCP listener thread
+    shutdown_tcp_listener: Arc<AtomicBool>,
+    /// Handle for shutting down the peer sampling thread
+    shutdown_peer_sampling: Arc<AtomicBool>,
 }
 
 impl PeerSamplingService {
@@ -353,6 +360,9 @@ impl PeerSamplingService {
         PeerSamplingService {
             view: Arc::new(Mutex::new(View::new(config.address().to_string()))),
             config,
+            thread_handles: Vec::new(),
+            shutdown_tcp_listener: Arc::new(AtomicBool::new(false)),
+            shutdown_peer_sampling: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -361,7 +371,7 @@ impl PeerSamplingService {
     /// # Arguments
     ///
     /// * `initial_peer` - A closure returning the initial peer for starting the protocol
-    pub fn init(&mut self, initial_peer: Box<dyn FnOnce() -> Option<Peer>>) -> Vec<JoinHandle<()>> {
+    pub fn init(&mut self, initial_peer: Box<dyn FnOnce() -> Option<Peer>>) {
         // get address of initial peer
         if let Some(initial_peer) = initial_peer() {
             self.view.lock().unwrap().peers.push(initial_peer);
@@ -369,13 +379,18 @@ impl PeerSamplingService {
 
         // listen to incoming message
         let (tx, rx) = std::sync::mpsc::channel();
-        let listener_handler = crate::network::start_listener(&self.config.address(), tx);
-        let receiver_handler = self.start_receiver(rx);
+        let listener_handle = crate::network::start_listener(&self.config.address(), tx, &self.shutdown_tcp_listener);
+        self.thread_handles.push(listener_handle);
+
+        // handle received messages
+        let receiver_handle = self.start_receiver(rx);
+        self.thread_handles.push(receiver_handle);
 
         // start peer sampling
-        let sampling_handler = self.start_sampling_activity();
+        let sampling_handle = self.start_sampling_activity();
+        self.thread_handles.push(sampling_handle);
 
-        vec![listener_handler, receiver_handler, sampling_handler]
+        log::info!("All activity threads were started");
     }
 
     /// Returns a random peer for the client application.
@@ -383,6 +398,33 @@ impl PeerSamplingService {
     /// The local view is built using [Gossip-Based Peer Sampling].
     pub fn get_peer(&mut self) -> Option<Peer> {
         self.view.lock().unwrap().get_peer()
+    }
+
+    /// Stops the threads related to peer sampling activity
+    pub fn shutdown(&mut self) -> Result<(), Box<dyn Error>> {
+        // request shutdown
+        self.shutdown_peer_sampling.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.shutdown_tcp_listener.store(true, std::sync::atomic::Ordering::SeqCst);
+        {
+            let guard = self.view.lock().unwrap();
+            crate::network::send(&guard.host_address.parse()?, Message::new_response(guard.host_address.to_owned(), None))?;
+        }
+        // wait for termination
+        let handles = self.thread_handles.drain(..);
+        let mut join_error = false;
+        for handle in handles {
+            if let Err(e) = handle.join() {
+                log::error!("Error joining thread: {:?}", e);
+                join_error = true;
+            }
+        }
+        log::info!("All activity threads were stopped");
+        if join_error {
+            Err("An error occurred during thread joining")?
+        }
+        else {
+            Ok(())
+        }
     }
 
     /// Builds the view to be exchanged with another peer
@@ -404,10 +446,11 @@ impl PeerSamplingService {
     /// # Arguments
     ///
     /// * `receiver` - The channel used for receiving incoming messages
-    fn start_receiver(&self, receiver: Receiver<Message>) -> JoinHandle<()> {
+    fn start_receiver(&self, receiver: Receiver<Message>) -> JoinHandle<()>{
         let config = self.config.clone();
         let view_arc = self.view.clone();
         std::thread::Builder::new().name(format!("{} - message handler", config.address())).spawn(move|| {
+            log::info!("Started message handling thread");
             while let Ok(message) = receiver.recv() {
                 log::debug!("Received: {:?}", message);
                 let mut view = view_arc.lock().unwrap();
@@ -436,6 +479,7 @@ impl PeerSamplingService {
 
                 view.increase_age();
             }
+            log::info!("Message handling thread exiting");
         }).unwrap()
     }
 
@@ -443,7 +487,9 @@ impl PeerSamplingService {
     fn start_sampling_activity(&self) -> JoinHandle<()> {
         let config = self.config.clone();
         let view_arc = self.view.clone();
+        let shutdown_requested = Arc::clone(&self.shutdown_peer_sampling);
         std::thread::Builder::new().name(format!("{} - peer sampling", config.address())).spawn(move || {
+            log::info!("Started peer sampling thread");
             loop {
                 // Compute time for sleep cycle
                 let deviation =
@@ -485,7 +531,14 @@ impl PeerSamplingService {
                 else {
                     log::warn!("No peer found for sampling")
                 }
+
+                // check for shutdown request
+                if shutdown_requested.load(std::sync::atomic::Ordering::SeqCst) {
+                    break;
+                }
             }
+
+            log::info!("Peer sampling thread exiting");
         }).unwrap()
     }
 }
