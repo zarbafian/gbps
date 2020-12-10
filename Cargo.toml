@@ -1,7 +1,7 @@
 [package]
 name = "gbps"
 description = "Rust implementation of gossip-based peer sampling"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Pouriya Zarbafian"]
 edition = "2018"
 license = "MIT"
