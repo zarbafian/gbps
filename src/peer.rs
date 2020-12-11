@@ -371,10 +371,10 @@ impl PeerSamplingService {
     /// # Arguments
     ///
     /// * `initial_peer` - A closure returning the initial peer for starting the protocol
-    pub fn init(&mut self, initial_peer: Box<dyn FnOnce() -> Option<Peer>>) {
+    pub fn init(&mut self, initial_peer: Box<dyn FnOnce() -> Option<Vec<Peer>>>) {
         // get address of initial peer
-        if let Some(initial_peer) = initial_peer() {
-            self.view.lock().unwrap().peers.push(initial_peer);
+        if let Some(mut initial_peers) = initial_peer() {
+            self.view.lock().unwrap().peers.append(&mut initial_peers);
         }
 
         // listen to incoming message

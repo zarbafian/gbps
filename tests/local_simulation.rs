@@ -61,7 +61,7 @@ fn peer_sampling_smoke_test() {
         // configuration
         let config = Config::new(address.parse().unwrap(), push, pull, t, d, c, h, s, Some(monitoring_config.clone()));
         // closure for retrieving the address of the first contact peer
-        let init_handler = Box::new(move|| { Some(Peer::new(init_address.to_owned())) });
+        let init_handler = Box::new(move|| { Some(vec![Peer::new(init_address.to_owned())]) });
 
         // create and initiate the peer sampling service
         let mut ipv4_service = PeerSamplingService::new(config);
@@ -78,7 +78,7 @@ fn peer_sampling_smoke_test() {
         // configuration
         let config = Config::new(address.parse().unwrap(), push, pull, t, d, c, h, s, Some(monitoring_config.clone()));
         // closure for retrieving the address of the first contact peer
-        let init_handler = Box::new(move|| { Some(Peer::new(init_address.to_owned())) });
+        let init_handler = Box::new(move|| { Some(vec![Peer::new(init_address.to_owned())]) });
 
         // create and initiate the peer sampling service
         let mut ipv6_service = PeerSamplingService::new(config);

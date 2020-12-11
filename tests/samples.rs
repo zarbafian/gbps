@@ -49,7 +49,7 @@ fn sample_code() {
         let config = Config::new("127.0.0.1:9001".parse().unwrap(), true, true, 6, 5, 20, 2, 8, None);
 
         // closure for retrieving the address of the initial contact peer
-        let initial_peer = Box::new(move|| { Some(Peer::new("127.0.0.1:9000".to_owned())) });
+        let initial_peer = Box::new(move|| { Some(vec![Peer::new("127.0.0.1:9000".to_owned())]) });
 
         // create and initiate the peer sampling service
         let mut sampling_service = PeerSamplingService::new(config);
