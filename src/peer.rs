@@ -449,7 +449,7 @@ impl PeerSamplingService {
     fn start_receiver(&self, receiver: Receiver<Message>) -> JoinHandle<()>{
         let config = self.config.clone();
         let view_arc = self.view.clone();
-        std::thread::Builder::new().name(format!("{} - message handler", config.address())).spawn(move|| {
+        std::thread::Builder::new().name(format!("{} - gbps receiver", config.address())).spawn(move|| {
             log::info!("Started message handling thread");
             while let Ok(message) = receiver.recv() {
                 log::debug!("Received: {:?}", message);
@@ -488,7 +488,7 @@ impl PeerSamplingService {
         let config = self.config.clone();
         let view_arc = self.view.clone();
         let shutdown_requested = Arc::clone(&self.shutdown_peer_sampling);
-        std::thread::Builder::new().name(format!("{} - peer sampling", config.address())).spawn(move || {
+        std::thread::Builder::new().name(format!("{} - gbps sampling", config.address())).spawn(move || {
             log::info!("Started peer sampling thread");
             loop {
                 // Compute time for sleep cycle

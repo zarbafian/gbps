@@ -23,7 +23,7 @@ pub fn start_listener(bind_address: &SocketAddr, sender: Sender<Message>, shutdo
     // shutdown flag
     let shutdown_requested = Arc::clone(shutdown_handle);
 
-    std::thread::Builder::new().name(format!("{} - TCP listener", bind_address)).spawn(move || {
+    std::thread::Builder::new().name(format!("{} - gbps listener", bind_address)).spawn(move || {
         log::info!("Started listener thread");
         // TOD: handle hanging connections wher peer connect but does not write
         for incoming_stream in listener.incoming() {
