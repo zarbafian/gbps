@@ -1,22 +1,8 @@
-use log::{Metadata, Level, Record, LevelFilter};
+use gbps::terminal_logger;
+use slog::{o, Logger};
 
 // logger for integration tests
 struct IntegrationTestLogger;
-
-// basic implementation that prints to stdout
-impl log::Log for IntegrationTestLogger {
-    fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= Level::Debug
-    }
-
-    fn log(&self, record: &Record) {
-        if self.enabled(record.metadata()) {
-            println!("{:?} - {}", record.level(), record.args());
-        }
-    }
-
-    fn flush(&self) {}
-}
 
 static LOGGER: IntegrationTestLogger = IntegrationTestLogger;
 
@@ -24,9 +10,8 @@ static LOGGER: IntegrationTestLogger = IntegrationTestLogger;
 fn peer_sampling_smoke_test() {
     use gbps::{Config, MonitoringConfig, PeerSamplingService, Peer};
 
-    log::set_logger(&LOGGER)
-        .map(|()| log::set_max_level(LevelFilter::Debug)).unwrap();
-
+    let logger = terminal_logger();
+    
     // algorithm parameters
     let push = true;
     let pull = true;
@@ -36,7 +21,7 @@ fn peer_sampling_smoke_test() {
     let h = 1;
     let s = 2;
 
-    let monitoring_config = MonitoringConfig::new(true, "http://127.0.0.1:8080/peers");
+    let monitoring_config = MonitoringConfig::new(true, "http://127.0.0.1:8080/peers", logger.clone());
 
     let peers_per_protocol = 5;
     let mut instances = vec![];
@@ -49,7 +34,7 @@ fn peer_sampling_smoke_test() {
     let no_peer_handler = Box::new(move|| { None });
 
     // create and initiate the peer sampling service
-    let mut service = PeerSamplingService::new(first_config);
+    let mut service = PeerSamplingService::new(first_config, logger.clone());
     service.init(no_peer_handler);
     instances.push(service);
 
@@ -64,7 +49,7 @@ fn peer_sampling_smoke_test() {
         let init_handler = Box::new(move|| { Some(vec![Peer::new(init_address.to_owned())]) });
 
         // create and initiate the peer sampling service
-        let mut ipv4_service = PeerSamplingService::new(config);
+        let mut ipv4_service = PeerSamplingService::new(config, logger.clone());
         ipv4_service.init(init_handler);
         instances.push(ipv4_service);
 
@@ -81,7 +66,7 @@ fn peer_sampling_smoke_test() {
         let init_handler = Box::new(move|| { Some(vec![Peer::new(init_address.to_owned())]) });
 
         // create and initiate the peer sampling service
-        let mut ipv6_service = PeerSamplingService::new(config);
+        let mut ipv6_service = PeerSamplingService::new(config, logger.clone());
         ipv6_service.init(init_handler);
         instances.push(ipv6_service);
 
@@ -101,8 +86,7 @@ fn peer_sampling_smoke_test() {
 fn does_shutdown() {
     use gbps::{Config, PeerSamplingService};
 
-    log::set_logger(&LOGGER)
-        .map(|()| log::set_max_level(LevelFilter::Debug)).unwrap();
+    let logger = terminal_logger();
 
     // configuration
     let config = Config::new("127.0.0.1:9000".parse().unwrap(), true, true, 1, 0, 20, 2, 8, None);
@@ -110,7 +94,7 @@ fn does_shutdown() {
     let init_handler = Box::new(move|| { None });
 
     // create and initiate the peer sampling service
-    let mut service = PeerSamplingService::new(config);
+    let mut service = PeerSamplingService::new(config, logger.clone());
     service.init(init_handler);
 
     std::thread::sleep(std::time::Duration::from_secs(3));

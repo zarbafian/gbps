@@ -1,33 +1,16 @@
-use gbps::{Config, PeerSamplingService, Peer};
-
-use log::{Metadata, Level, Record, LevelFilter};
+use gbps::{terminal_logger, Config, Peer, PeerSamplingService};
 
 // logger for integration tests
 struct IntegrationTestLogger;
-
-// basic implementation that prints to stdout
-impl log::Log for IntegrationTestLogger {
-    fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= Level::Debug
-    }
-
-    fn log(&self, record: &Record) {
-        if self.enabled(record.metadata()) {
-            println!("{:?} - {}", record.level(), record.args());
-        }
-    }
-
-    fn flush(&self) {}
-}
 
 static LOGGER: IntegrationTestLogger = IntegrationTestLogger;
 
 #[test]
 fn sample_code() {
 
-    log::set_logger(&LOGGER)
-        .map(|()| log::set_max_level(LevelFilter::Debug)).unwrap();
+    let logger = terminal_logger();
 
+    let logger_clone = logger.clone();
     let first_handle = std::thread::spawn(|| {
         // configuration
         let config = Config::new("127.0.0.1:9000".parse().unwrap(), true, true, 6, 5, 20, 2, 8, None);
@@ -36,7 +19,7 @@ fn sample_code() {
         let no_initial_peer = Box::new(move|| { None });
 
         // create and initiate the peer sampling service
-        let mut sampling_service = PeerSamplingService::new(config);
+        let mut sampling_service = PeerSamplingService::new(config, logger_clone);
         sampling_service.init(no_initial_peer);
         std::thread::sleep(std::time::Duration::from_secs(20));
 
@@ -44,6 +27,7 @@ fn sample_code() {
         sampling_service.shutdown().unwrap();
     });
 
+    let logger_clone = logger.clone();
     let second_handle = std::thread::spawn(|| {
         // configuration
         let config = Config::new("127.0.0.1:9001".parse().unwrap(), true, true, 6, 5, 20, 2, 8, None);
@@ -52,7 +36,7 @@ fn sample_code() {
         let initial_peer = Box::new(move|| { Some(vec![Peer::new("127.0.0.1:9000".to_owned())]) });
 
         // create and initiate the peer sampling service
-        let mut sampling_service = PeerSamplingService::new(config);
+        let mut sampling_service = PeerSamplingService::new(config, logger_clone);
         sampling_service.init(initial_peer);
         std::thread::sleep(std::time::Duration::from_secs(20));
 

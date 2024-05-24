@@ -1,6 +1,11 @@
 use std::io::Read;
 use std::io::Write;
 
+use slog::debug;
+use slog::o;
+use slog::warn;
+use slog::Logger;
+
 /// Configuration for sending protocol monitoring data
 #[derive(Clone)]
 pub struct MonitoringConfig {
@@ -10,6 +15,8 @@ pub struct MonitoringConfig {
     host: String,
     /// URL context
     context: String,
+    /// Logger
+    logger: Logger,
 }
 
 impl MonitoringConfig {
@@ -19,7 +26,7 @@ impl MonitoringConfig {
     ///
     /// * `enabled` - Share monitoring data
     /// * `url` - URL of monitoring host
-    pub fn new(enabled: bool, url: &str) -> MonitoringConfig {
+    pub fn new(enabled: bool, url: &str, logger: Logger) -> MonitoringConfig {
         // remove leading protocol
         let protocol_removed = if url.starts_with("http://") {
             &url[7..] }
@@ -35,6 +42,7 @@ impl MonitoringConfig {
             enabled,
             host: host.to_owned(),
             context: context.to_owned(),
+            logger,
         }
     }
 
@@ -52,6 +60,7 @@ impl MonitoringConfig {
         let pid = pid.to_owned();
         let host = self.host.clone();
         let context = self.context.clone();
+        let logger = self.logger.clone();
         std::thread::spawn(move || {
             let peers_str = peers.iter()
                 .map(|peer| format!("\"{}\"", peer))
@@ -63,14 +72,14 @@ impl MonitoringConfig {
                 \"messages\":[{}]\
             }}", pid, peers_str, "");
             //println!("send_data:\n{}", json);
-            match MonitoringConfig::post(&host, &context, json) {
-                Ok(()) => log::debug!("Peer {}: monitoring data sent", pid),
-                Err(e) => log::warn!("Peer {} could not send monitoring data to {}: {}", pid, host, e),
+            match MonitoringConfig::post(&host, &context, json, logger.clone()) {
+                Ok(()) => debug!(logger, "Peer {}: monitoring data sent", pid),
+                Err(e) => warn!(logger, "Peer {} could not send monitoring data to {}: {}", pid, host, e),
             }
         });
     }
 
-    fn post(host: &str, context: &str, json: String) -> std::io::Result<()> {
+    fn post(host: &str, context: &str, json: String, logger: Logger) -> std::io::Result<()> {
 
         let bytes = json.as_bytes();
 
@@ -100,7 +109,7 @@ impl MonitoringConfig {
         let mut buf = String::new();
         let _result = stream.read_to_string(&mut buf)?;
         //println!("result = {}", result);
-        log::debug!("buf = {}", buf);
+        debug!(logger, "buf = {}", buf);
 
         Ok(())
     }
@@ -112,6 +121,7 @@ impl Default for MonitoringConfig {
             enabled: false,
             host: "".to_string(),
             context: "".to_string(),
+            logger: Logger::root(slog::Discard, o!()),
         }
     }
 }

@@ -35,6 +35,7 @@ impl Config {
             Some(config) => config,
             None => MonitoringConfig::default(),
         };
+
         Config {
             address,
             push,
@@ -44,7 +45,7 @@ impl Config {
             view_size,
             healing_factor,
             swapping_factor,
-            monitoring
+            monitoring,
         }
     }
 

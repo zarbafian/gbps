@@ -8,6 +8,7 @@ use std::iter::FromIterator;
 
 use rand::Rng;
 use rand::seq::SliceRandom;
+use slog::{debug, error, info, warn, Logger};
 
 use crate::message::{Message, MessageType};
 use std::hash::{Hash, Hasher};
@@ -24,6 +25,8 @@ struct View {
     peers: Vec<Peer>,
     /// The queue from which peer are retrieved for the application layer
     queue: VecDeque<Peer>,
+    /// Logger
+    logger: Logger,
 }
 impl View {
     /// Creates a new view with the node's address
@@ -31,11 +34,13 @@ impl View {
     /// # Arguments
     ///
     /// * `address` - Addres of peer
-    fn new(host_address: String) -> View {
+    /// * `logger` - Logger
+    fn new(host_address: String, logger: Logger) -> View {
         View {
             host_address,
             peers: vec![],
             queue: VecDeque::new(),
+            logger,
         }
     }
 
@@ -45,7 +50,7 @@ impl View {
             None
         }
         else {
-            let selected_peer = rand::thread_rng().gen_range(0, self.peers.len());
+            let selected_peer = rand::thread_rng().gen_range(0..self.peers.len());
             Some(self.peers[selected_peer].clone())
         }
     }
@@ -79,7 +84,7 @@ impl View {
                 }
             }
             new_view_start.append(&mut new_view_end);
-            std::mem::replace(&mut self.peers, new_view_start);
+            let _ = std::mem::replace(&mut self.peers, new_view_start);
         }
     }
 
@@ -130,7 +135,7 @@ impl View {
         let new_view = self.peers.iter()
             .map(|peer| peer.address.to_owned())
             .collect::<Vec<String>>();
-        log::debug!("{}", new_view.join(", "));
+        debug!(self.logger, "{}", new_view.join(", "));
         if monitoring_config.enabled() {
             monitoring_config.send_data(&self.host_address, new_view);
         }
@@ -152,7 +157,7 @@ impl View {
             }
         });
         let new_view = Vec::from_iter(unique_peers);
-        std::mem::replace(&mut self.peers, new_view);
+        let _ = std::mem::replace(&mut self.peers, new_view);
     }
 
     /// Removes the oldest items from the view based on the healing parameter
@@ -174,7 +179,7 @@ impl View {
                     new_view.push(peer.clone());
                 }
             }
-            std::mem::replace(&mut self.peers, new_view);
+            let _ = std::mem::replace(&mut self.peers, new_view);
         }
     }
 
@@ -198,7 +203,7 @@ impl View {
     fn remove_at_random(&mut self, c: usize) {
         if self.peers.len() > c {
             for _ in 0..(self.peers.len() - c) {
-                let remove_index = rand::thread_rng().gen_range(0, self.peers.len());
+                let remove_index = rand::thread_rng().gen_range(0..self.peers.len());
                 self.peers.remove(remove_index);
             }
         }
@@ -347,6 +352,8 @@ pub struct PeerSamplingService {
     shutdown_tcp_listener: Arc<AtomicBool>,
     /// Handle for shutting down the peer sampling thread
     shutdown_peer_sampling: Arc<AtomicBool>,
+    /// Logger
+    logger: Logger,
 }
 
 impl PeerSamplingService {
@@ -356,13 +363,14 @@ impl PeerSamplingService {
     /// # Arguments
     ///
     /// * `config` - The parameters for the peer sampling protocol
-    pub fn new(config: Config) -> PeerSamplingService {
+    pub fn new(config: Config, logger: Logger) -> PeerSamplingService {
         PeerSamplingService {
-            view: Arc::new(Mutex::new(View::new(config.address().to_string()))),
+            view: Arc::new(Mutex::new(View::new(config.address().to_string(), logger.clone()))),
             config,
             thread_handles: Vec::new(),
             shutdown_tcp_listener: Arc::new(AtomicBool::new(false)),
             shutdown_peer_sampling: Arc::new(AtomicBool::new(false)),
+            logger,
         }
     }
 
@@ -379,7 +387,7 @@ impl PeerSamplingService {
 
         // listen to incoming message
         let (tx, rx) = std::sync::mpsc::channel();
-        let listener_handle = crate::network::start_listener(&self.config.address(), tx, &self.shutdown_tcp_listener);
+        let listener_handle = crate::network::start_listener(&self.config.address(), tx, &self.shutdown_tcp_listener, self.logger.clone());
         self.thread_handles.push(listener_handle);
 
         // handle received messages
@@ -390,7 +398,7 @@ impl PeerSamplingService {
         let sampling_handle = self.start_sampling_activity();
         self.thread_handles.push(sampling_handle);
 
-        log::info!("All activity threads were started");
+        info!(self.logger, "All activity threads were started");
     }
 
     /// Returns a random peer for the client application.
@@ -407,18 +415,18 @@ impl PeerSamplingService {
         self.shutdown_tcp_listener.store(true, std::sync::atomic::Ordering::SeqCst);
         {
             let guard = self.view.lock().unwrap();
-            crate::network::send(&guard.host_address.parse()?, Message::new_response(guard.host_address.to_owned(), None))?;
+            crate::network::send(&guard.host_address.parse()?, Message::new_response(guard.host_address.to_owned(), None), self.logger.clone())?;
         }
         // wait for termination
         let handles = self.thread_handles.drain(..);
         let mut join_error = false;
         for handle in handles {
             if let Err(e) = handle.join() {
-                log::error!("Error joining thread: {:?}", e);
+                error!(self.logger, "Error joining thread: {:?}", e);
                 join_error = true;
             }
         }
-        log::info!("All activity threads were stopped");
+        info!(self.logger, "All activity threads were stopped");
         if join_error {
             Err("An error occurred during thread joining")?
         }
@@ -449,23 +457,24 @@ impl PeerSamplingService {
     fn start_receiver(&self, receiver: Receiver<Message>) -> JoinHandle<()>{
         let config = self.config.clone();
         let view_arc = self.view.clone();
+        let logger = self.logger.clone();
         std::thread::Builder::new().name(format!("{} - gbps receiver", config.address())).spawn(move|| {
-            log::info!("Started message handling thread");
+            info!(logger, "Started message handling thread");
             while let Ok(message) = receiver.recv() {
-                log::debug!("Received: {:?}", message);
+                debug!(logger, "Received: {:?}", message);
                 let mut view = view_arc.lock().unwrap();
                 if let MessageType::Request = message.message_type() {
                     if config.is_pull() {
                         let buffer = Self::build_buffer(&config, &mut view);
-                        log::debug!("Built response buffer: {:?}", buffer);
+                        debug!(logger, "Built response buffer: {:?}", buffer);
                         if let Ok(remote_address) = message.sender().parse::<SocketAddr>() {
-                            match crate::network::send(&remote_address, Message::new_response(config.address().to_string(), Some(buffer))) {
-                                Ok(()) => log::debug!("Buffer sent successfully"),
-                                Err(e) => log::error!("Error sending buffer: {}", e),
+                            match crate::network::send(&remote_address, Message::new_response(config.address().to_string(), Some(buffer)), logger.clone()) {
+                                Ok(()) => debug!(logger, "Buffer sent successfully"),
+                                Err(e) => error!(logger, "Error sending buffer: {}", e),
                             }
                         }
                         else {
-                            log::error!("Could not parse sender address {}", &message.sender());
+                            error!(logger, "Could not parse sender address {}", &message.sender());
                         }
                     }
                 }
@@ -474,12 +483,12 @@ impl PeerSamplingService {
                     view.select(config.view_size(), config.healing_factor(), config.swapping_factor(), &buffer, config.monitoring().clone());
                 }
                 else {
-                    log::warn!("received a response with an empty buffer");
+                    warn!(logger, "received a response with an empty buffer");
                 }
 
                 view.increase_age();
             }
-            log::info!("Message handling thread exiting");
+            info!(logger, "Message handling thread exiting");
         }).unwrap()
     }
 
@@ -488,48 +497,49 @@ impl PeerSamplingService {
         let config = self.config.clone();
         let view_arc = self.view.clone();
         let shutdown_requested = Arc::clone(&self.shutdown_peer_sampling);
+        let logger = self.logger.clone();
         std::thread::Builder::new().name(format!("{} - gbps sampling", config.address())).spawn(move || {
-            log::info!("Started peer sampling thread");
+            info!(logger, "Started peer sampling thread");
             loop {
                 // Compute time for sleep cycle
                 let deviation =
                     if config.sampling_deviation() == 0 { 0 }
-                    else { rand::thread_rng().gen_range(0, config.sampling_deviation() * 1000) };
+                    else { rand::thread_rng().gen_range(0..(config.sampling_deviation() * 1000)) };
                 let sleep_time = config.sampling_period() * 1000 + deviation;
                 std::thread::sleep(Duration::from_millis(sleep_time));
 
-                log::debug!("Sampling peers");
+                debug!(logger, "Sampling peers");
                 let mut view = view_arc.lock().unwrap();
                 if let Some(peer) = view.select_peer() {
                     if config.is_push() {
                         let buffer = Self::build_buffer(&config, &mut view);
                         // send local view
                         if let Ok(remote_address) = &peer.address.parse::<SocketAddr>() {
-                            match crate::network::send(remote_address, Message::new_request(config.address().to_string(), Some(buffer))) {
-                                Ok(()) => log::debug!("Buffer sent successfully"),
-                                Err(e) => log::error!("Error sending buffer: {}", e),
+                            match crate::network::send(remote_address, Message::new_request(config.address().to_string(), Some(buffer)), logger.clone()) {
+                                Ok(()) => debug!(logger, "Buffer sent successfully"),
+                                Err(e) => error!(logger, "Error sending buffer: {}", e),
                             }
                         }
                         else {
-                            log::error!("Could not parse sender address {}", &peer.address);
+                            error!(logger, "Could not parse sender address {}", &peer.address);
                         }
                     }
                     else {
                         // send empty view to trigger response
                         if let Ok(remote_address) = &peer.address.parse::<SocketAddr>() {
-                            match crate::network::send(remote_address, Message::new_request(config.address().to_string(), None)) {
-                                Ok(()) => log::debug!("Empty view sent successfully"),
-                                Err(e) => log::error!("Error sending empty view: {}", e),
+                            match crate::network::send(remote_address, Message::new_request(config.address().to_string(), None), logger.clone()) {
+                                Ok(()) => debug!(logger, "Empty view sent successfully"),
+                                Err(e) => error!(logger, "Error sending empty view: {}", e),
                             }
                         }
                         else {
-                            log::error!("Could not parse sender address {}", &peer.address);
+                            error!(logger, "Could not parse sender address {}", &peer.address);
                         }
                     }
                     view.increase_age();
                 }
                 else {
-                    log::warn!("No peer found for sampling")
+                    warn!(logger, "No peer found for sampling")
                 }
 
                 // check for shutdown request
@@ -538,7 +548,7 @@ impl PeerSamplingService {
                 }
             }
 
-            log::info!("Peer sampling thread exiting");
+            info!(logger, "Peer sampling thread exiting");
         }).unwrap()
     }
 }
